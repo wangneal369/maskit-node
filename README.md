@@ -46,9 +46,18 @@ Data Maskit 不需要你改变使用习惯：工具照常用，敏感信息自�
 
 | 系统 | 文件 | 说明 |
 |---|---|---|
-| Windows | `DataMaskit-win-<版本>-x64.exe` | 若出现 SmartScreen 提示，点「更多信息 → 仍要运行」 |
+| Windows x64 | `DataMaskit-win-<版本>-x64.exe` | 若出现 SmartScreen 提示，点「更多信息 → 仍要运行」 |
+| Windows arm64 | `DataMaskit-win-<版本>-arm64.exe` | 同上；适用于骁龙等 ARM 设备 |
 | macOS（Apple 芯片） | `DataMaskit-mac-<版本>-arm64.dmg` | 安装包未签名，首次打开请右键 →「打开」，或执行 `xattr -cr /Applications/DataMaskit.app` |
-| Linux | `DataMaskit-linux-<版本>-amd64.deb` | `sudo dpkg -i DataMaskit-linux-*.deb` |
+| Linux x64 | `DataMaskit-linux-<版本>-amd64.deb` | `sudo dpkg -i DataMaskit-linux-*.deb` |
+| Linux arm64 | `DataMaskit-linux-<版本>-arm64.deb` | 同上；适用于树莓派 4/5（64 位系统）、ARM 服务器 |
+
+各架构的安装包只会更新到同架构的新版本（Windows arm64 读取 `arm64.yml`，Linux arm64 读取 `latest-linux-arm64.yml`，x64 仍是 `latest.yml` / `latest-linux.yml`）。
+
+说明：
+
+- 不提供 32 位安装包（Windows ia32、Linux armv7l 等；Electron 也已不再支持 Linux 32 位 x86）；Intel 芯片的 Mac 暂不提供安装包。
+- 语义识别（NER）依赖 `onnxruntime-node` 的预编译库，当前覆盖 Windows x64/arm64、Linux x64/arm64、macOS arm64；其余架构应用照常使用，仅 NER 显示不可用。
 
 ### 2. 打开应用
 
@@ -248,7 +257,7 @@ Skill 包也随 Release 发布（`maskit-placeholders-<版本>.zip`）。即使�
 
 ## Docker 部署
 
-无头版（不含 Electron）：同一套网关 + 浏览器扩展桥接 + 浏览器访问的控制面板，适合放在内网服务器或 NAS 上给多台设备共用。
+无头版（不含 Electron），镜像支持 `linux/amd64` 与 `linux/arm64`（树莓派 4/5 等 64 位 ARM 设备可直接拉取）：同一套网关 + 浏览器扩展桥接 + 浏览器访问的控制面板，适合放在内网服务器或 NAS 上给多台设备共用。
 
 ```bash
 docker run -d --name maskit --restart unless-stopped   -p 127.0.0.1:18700:18700 -p 127.0.0.1:18701-18703:18701-18703 -p 127.0.0.1:5801:5801   -v maskit_data:/data   -e MASKIT_TOKEN=换成至少16位的随机串   ghcr.io/wangneal369/maskit-node:latest
@@ -292,7 +301,7 @@ npm run typecheck    # 类型检查
 npm test             # 单元与端到端测试
 ```
 
-打包：先 `npm run build`，再执行 `npm run build-w`（Windows）/ `npm run build-m-arm64`（macOS）/ `npm run build-l`（Linux），产物在 `out/`。推送 `v*` 标签时 GitHub Actions 会自动构建三平台安装包并发布 Release。
+打包：先 `npm run build`，再执行 `npm run build-w` / `build-w-arm64`（Windows x64 / arm64）、`npm run build-m-arm64`（macOS）、`npm run build-l` / `build-l-arm64`（Linux x64 / arm64），产物在 `out/`；打包时会按目标架构裁剪 `onnxruntime-node` 的原生库（`cmd/after-pack.cjs`）。推送 `v*` 标签时 GitHub Actions 会自动构建全部安装包并发布 Release。
 
 ```
 electron/core/        脱敏与还原核心（不依赖 Electron，可单独复用）

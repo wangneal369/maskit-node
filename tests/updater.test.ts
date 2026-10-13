@@ -28,6 +28,20 @@ describe('decideSupport', () => {
   });
 });
 
+describe('decideSupport 与 CPU 架构无关', () => {
+  // 判定入参不含架构：Windows x64/arm64、Linux deb x64/arm64 结论必须相同；各架构走各自的通道文件（见 build-channels.test.ts）
+  it.each(['x64', 'arm64'])('Windows %s 打包版支持', () => {
+    expect(decideSupport({ platform: 'win32', packaged: true })).toEqual({ supported: true });
+  });
+  it.each(['x64', 'arm64'])('Linux deb %s 支持，非 deb 不支持', () => {
+    expect(decideSupport({ platform: 'linux', packaged: true, packageType: 'deb' }).supported).toBe(true);
+    expect(decideSupport({ platform: 'linux', packaged: true, packageType: 'AppImage' }).supported).toBe(false);
+  });
+  it.each(['x64', 'arm64'])('macOS %s 一律不支持', () => {
+    expect(decideSupport({ platform: 'darwin', packaged: true })).toEqual({ supported: false, platformNote: MAC_NOTE });
+  });
+});
+
 describe('reduceState', () => {
   const base = initialState({ supported: true });
 

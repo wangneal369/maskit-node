@@ -6,6 +6,7 @@
     "output": "out"
   },
   "asar": true,
+  "afterPack": "./cmd/after-pack.cjs",
   "asarUnpack": [
     "node_modules/onnxruntime-node/**"
   ],
@@ -34,14 +35,12 @@
       "to": "agent-bundle"
     }
   ],
-  "publish": [
-    {
-      "provider": "github",
-      "owner": "wangneal369",
-      "repo": "maskit-node",
-      "releaseType": "release"
-    }
-  ],
+  "publish": {
+    "provider": "github",
+    "owner": "wangneal369",
+    "repo": "maskit-node",
+    "releaseType": "release"
+  },
   "mac": {
     "icon": "build/icons/icon.icns",
     "artifactName": "${productName}-${os}-${version}-${arch}.${ext}",

@@ -26,7 +26,7 @@ export const DEV_NOTE = '开发模式不支持应用内更新';
 export const LINUX_UNSUPPORTED_NOTE = '当前 Linux 安装形态不支持自动更新，请前往下载页更新';
 export const LINUX_DEB_NOTE = 'Linux deb 更新安装时会弹出系统授权窗口，需要输入管理员密码';
 
-/** 判定本平台是否支持应用内更新。packageType 来自 resources/package-type（仅 Linux fpm 包有） */
+/** 判定本平台是否支持应用内更新（与 CPU 架构无关：Windows 任意架构支持，Linux deb 任意架构支持，macOS 一律不支持）。packageType 来自 resources/package-type（仅 Linux fpm 包有） */
 export function decideSupport(opts: {
   platform: string;
   packaged: boolean;

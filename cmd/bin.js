@@ -109,8 +109,13 @@ module.exports = {
       directory: './',
       args: ['--config=./cmd/builder.json', '-w=nsis', '--x64', '--publish=never'],
     },
-    win32: {
-      args: ['--config=./cmd/builder.json', '-w=nsis', '--ia32', '--publish=never'],
+    // 非 x64 的 Windows 构建通过 publish.channel 写出独立的更新通道文件（arm64.yml），
+    // 且打进包内 app-update.yml 的 channel 相同，运行中的应用只会拉取同架构的更新；x64 Windows 保持 latest。
+    // Linux 不需要：electron-builder 与 electron-updater 都按架构自动加后缀（latest-linux.yml / latest-linux-arm64.yml）。
+    win_arm64: {
+      cmd: 'electron-builder',
+      directory: './',
+      args: ['--config=./cmd/builder.json', '-w=nsis', '--arm64', '-c.publish.channel=arm64', '--publish=never'],
     },
     win_e: {
       args: ['--config=./cmd/builder.json', '-w=portable', '--x64', '--publish=never'],

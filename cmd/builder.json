@@ -6,6 +6,7 @@
     "output": "out"
   },
   "asar": true,
+  "afterPack": "./cmd/after-pack.cjs",
   "asarUnpack": [
     "node_modules/onnxruntime-node/**"
   ],
@@ -18,8 +19,7 @@
     "package.json",
     "node_modules/**/*",
     "!node_modules/onnxruntime-node/bin/napi-v*/darwin/**",
-    "!node_modules/onnxruntime-node/bin/napi-v*/linux/**",
-    "!node_modules/onnxruntime-node/bin/napi-v*/win32/arm64/**"
+    "!node_modules/onnxruntime-node/bin/napi-v*/linux/**"
   ],
   "extraResources": [
     {
@@ -46,14 +46,12 @@
     "createStartMenuShortcut": true,
     "shortcutName": "Data Maskit"
   },
-  "publish": [
-    {
-      "provider": "github",
-      "owner": "wangneal369",
-      "repo": "maskit-node",
-      "releaseType": "release"
-    }
-  ],
+  "publish": {
+    "provider": "github",
+    "owner": "wangneal369",
+    "repo": "maskit-node",
+    "releaseType": "release"
+  },
   "win": {
     "icon": "build/icons/icon.ico",
     "artifactName": "${productName}-${os}-${version}-${arch}.${ext}",

@@ -7,6 +7,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  # onnxruntime-node 的 install 脚本在 linux/x64 上会额外下载 CUDA/TensorRT 执行器（数百 MB）；
+  # NER 只用 CPU 执行器（CPU 库随 npm 包自带），跳过下载可显著缩小 deb 体积并加快 npm ci
+  ONNXRUNTIME_NODE_INSTALL: skip
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -44,6 +49,15 @@ jobs:
               out/*.exe
               out/*.exe.blockmap
               out/latest.yml
+          # Windows arm64：在 x64 的 windows-latest 上交叉打包 NSIS（无需运行 ARM 二进制）。
+          # 更新通道 arm64（arm64.yml）：打进包内 app-update.yml，arm64 用户只会取 arm64.yml，不会被更新成 x64 安装包
+          - os: windows-latest
+            script: build-w-arm64
+            artifact: windows-arm64
+            files: |
+              out/*.exe
+              out/*.exe.blockmap
+              out/arm64.yml
           - os: macos-latest
             script: build-m-arm64
             artifact: macos-arm64
@@ -59,6 +73,14 @@ jobs:
             files: |
               out/*.deb
               out/latest-linux.yml
+          # Linux arm64 deb：在 x64 的 ubuntu-latest 上用 fpm 交叉打包（应用已预编译，fpm 只写 arm64 元数据，不执行目标架构代码）。
+          # electron-builder 与 electron-updater 都内置按架构加后缀：产物 latest-linux-arm64.yml，arm64 用户自动读取它，无需自定义 channel
+          - os: ubuntu-latest
+            script: build-l-arm64
+            artifact: linux-arm64
+            files: |
+              out/*.deb
+              out/latest-linux-arm64.yml
     runs-on: ${{ matrix.os }}
     env:
       # 未配置签名证书：关闭 macOS 自动查找签名身份，产物为未签名包

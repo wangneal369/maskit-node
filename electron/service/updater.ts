@@ -53,6 +53,11 @@ class UpdaterService {
     if (!this.st.supported) return;
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = true;
+    // 各架构的更新通道（如 arm64.yml）由打包时写入 app-update.yml 的 channel 决定，不是 prerelease：
+    // 显式关掉这两项，避免任何配置/版本号变化把非 x64 用户引到预发布或允许降级到别的架构安装包
+    // （electron-updater 只有在代码里给 autoUpdater.channel 赋值时才会自动开启 allowDowngrade，这里不赋值）
+    autoUpdater.allowPrerelease = false;
+    autoUpdater.allowDowngrade = false;
     autoUpdater.logger = {
       info: (m?: unknown) => logger.info('[updater]', m),
       warn: (m?: unknown) => logger.warn('[updater]', m),

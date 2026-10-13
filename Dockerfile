@@ -31,6 +31,10 @@ RUN npm run build --prefix frontend \
 FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
 
+# onnxruntime-node 的 install 脚本在 linux/x64 上会额外下载 CUDA/TensorRT 执行器（数百 MB）；NER 只用 CPU，
+# CPU 库随 npm 包自带，跳过下载可显著缩小镜像（对 arm64 本就无此下载，行为一致）
+ENV ONNXRUNTIME_NODE_INSTALL=skip
+
 # 仅 NER（本地语义实体识别）需要原生依赖 onnxruntime-node：版本取自 lockfile，
 # 其余依赖都已打进 dist-server/main.cjs。在目标架构上安装，才能拿到对应的预编译二进制。
 COPY package.json package-lock.json /tmp/pkg/
