@@ -8,6 +8,7 @@
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
+import zlib from 'node:zlib';
 import { Agent, fetch, ProxyAgent, type Dispatcher, type Response } from 'undici';
 import { maskJson, Masker, Restorer, SseRestorer } from '../core';
 
@@ -35,6 +36,8 @@ export interface GatewayEvent {
   unresolved: number;
   signedBlocksSkipped: number;
   error?: string;
+  /** 落库序号（同一毫秒内的先后），与 time 一起组成分页游标；由服务层写入 */
+  seq?: number;
 }
 
 const MAX_BODY = 32 * 1024 * 1024;
@@ -67,6 +70,51 @@ function readBody(req: http.IncomingMessage): Promise<Buffer> {
 function isLoopback(url: string): boolean {
   const host = new URL(url).hostname.replace(/^\[|\]$/g, '');
   return host === 'localhost' || host === '::1' || host.startsWith('127.');
+}
+
+/**
+ * 按 Content-Encoding 解压请求体（多个编码按应用顺序列出，需逆序解码）。
+ * 未知编码 / 解压失败 / 超出 MAX_BODY 一律抛错，由调用方 fail-closed。
+ */
+function decodeRequestBody(body: Buffer, encodingHeader: string): Buffer {
+  const encodings = encodingHeader.split(',').map((x) => x.trim().toLowerCase()).filter((x) => x && x !== 'identity');
+  const opts = { maxOutputLength: MAX_BODY };
+  let out = body;
+  for (const enc of encodings.reverse()) {
+    try {
+      switch (enc) {
+        case 'gzip':
+        case 'x-gzip':
+          out = zlib.gunzipSync(out, opts);
+          break;
+        case 'deflate':
+          try {
+            out = zlib.inflateSync(out, opts);
+          } catch (e) {
+            // 部分客户端发送无 zlib 头的 raw deflate；超限错误不回退
+            if ((e as NodeJS.ErrnoException).code === 'ERR_BUFFER_TOO_LARGE') throw e;
+            out = zlib.inflateRawSync(out, opts);
+          }
+          break;
+        case 'br':
+          out = zlib.brotliDecompressSync(out, opts);
+          break;
+        case 'zstd': {
+          const zstd = (zlib as unknown as { zstdDecompressSync?: (b: Buffer, o: object) => Buffer }).zstdDecompressSync;
+          if (typeof zstd !== 'function') throw new Error('当前运行时不支持 zstd');
+          out = zstd(out, opts);
+          break;
+        }
+        default:
+          throw new Error(`不支持的 Content-Encoding: ${enc}`);
+      }
+    } catch (e) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === 'ERR_BUFFER_TOO_LARGE') throw new Error(`解压后超过 ${MAX_BODY / 1024 / 1024}MB 上限`);
+      throw e;
+    }
+  }
+  return out;
 }
 
 function matchPath(pathname: string, paths: string[]): boolean {
@@ -144,6 +192,19 @@ export class Gateway extends EventEmitter {
     };
 
     let body: Buffer = await readBody(req);
+    const contentEncoding = String(req.headers['content-encoding'] ?? '').trim();
+    if (isTarget && contentEncoding && body.length) {
+      try {
+        body = decodeRequestBody(body, contentEncoding);
+      } catch (e) {
+        // fail-closed：无法解码就无法脱敏，绝不把压缩体原样转发
+        ev.error = `decode_failed: ${(e as Error).message}`;
+        ev.status = 502;
+        this.finish(ev, started);
+        sendJsonError(res, 502, `Maskit 无法解码请求体（Content-Encoding: ${contentEncoding}），已阻断请求: ${(e as Error).message}`);
+        return;
+      }
+    }
     if (isTarget && body.length) {
       try {
         const result = maskJson(this.masker, JSON.parse(body.toString('utf8')));
@@ -164,6 +225,8 @@ export class Gateway extends EventEmitter {
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(req.headers)) {
       if (v === undefined || DROP_REQ_HEADERS.has(k)) continue;
+      // 目标路径已解压，转发的是明文体，必须去掉 content-encoding
+      if (isTarget && k === 'content-encoding') continue;
       headers[k] = Array.isArray(v) ? v.join(', ') : v;
     }
     headers['accept-encoding'] = 'identity';

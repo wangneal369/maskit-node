@@ -23,6 +23,10 @@
     {
       "from": "extension",
       "to": "extension"
+    },
+    {
+      "from": "agent-bundle",
+      "to": "agent-bundle"
     }
   ],
   "publish": null,

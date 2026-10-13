@@ -58,6 +58,20 @@
     </div>
 
     <div class="card">
+      <div class="card-title">数据存储</div>
+      <div class="row" style="margin-bottom:6px">
+        <div class="switch" :class="{ on: cfg.storage.persistMappings }" @click="cfg.storage.persistMappings = !cfg.storage.persistMappings"></div>
+        <b>持久化占位符映射</b>
+      </div>
+      <div class="sub" style="margin-bottom:12px">开启后，非凭据类映射（手机号、邮箱、自定义词等）保存到本地，重启后仍可还原历史对话中的占位符；API Key、密码、私钥等凭据永不写入磁盘。</div>
+      <div class="row">
+        <span>日志保留条数</span>
+        <input class="input" style="width:120px" type="number" min="100" max="100000" v-model.number="cfg.storage.maxEvents" />
+        <span class="sub">范围 100–100000</span>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="card-title">出网代理</div>
       <div class="sub" style="margin-bottom:8px">留空 = 自动（环境变量 → 系统代理）；填 direct = 强制直连；或填写 http://127.0.0.1:7890 这类 HTTP 代理地址。本机上游始终直连。</div>
       <input class="input mono" style="width:100%" v-model="cfg.egressProxy" placeholder="自动" />
@@ -84,7 +98,12 @@ const parsePaths = (s) => s.split(/[,，]/).map((x) => x.trim()).filter(Boolean)
 const nextPort = () => Math.max(18700, ...cfg.value.upstreams.map((u) => Number(u.port) || 0)) + 1;
 
 async function load() {
-  try { cfg.value = await gw.getConfig(); err.value = ''; }
+  try {
+    const c = await gw.getConfig();
+    // 兼容旧配置：缺少 storage 时补默认值
+    c.storage = { persistMappings: true, maxEvents: 5000, ...(c.storage || {}) };
+    cfg.value = c; err.value = '';
+  }
   catch (e) { err.value = e?.message || String(e); }
 }
 
@@ -95,6 +114,9 @@ async function save() {
       return toast('上游的名称、目标地址和端口(1-65535)不能为空', false);
     }
   }
+  const me = Number(c.storage.maxEvents);
+  if (!Number.isInteger(me) || me < 100 || me > 100000) return toast('日志保留条数需为 100–100000 的整数', false);
+  c.storage.maxEvents = me;
   const ports = c.upstreams.map((u) => u.port);
   if (new Set(ports).size !== ports.length) return toast('上游端口不能重复', false);
   // 清理空项

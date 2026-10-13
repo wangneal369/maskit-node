@@ -93,6 +93,10 @@ jobs:
         run: |
           cd extension
           zip -r "../dist/DataMaskit-extension-${GITHUB_REF_NAME}.zip" .
+      - name: Zip skill bundle
+        run: |
+          cd agent-bundle
+          zip -r "../dist/maskit-placeholders-${GITHUB_REF_NAME}.zip" maskit-placeholders/SKILL.md maskit-placeholders/README.md maskit-placeholders/README_EN.md maskit-placeholders/templates/AGENTS.snippet.md
       - uses: softprops/action-gh-release@v3
         with:
           files: dist/*

@@ -17,7 +17,11 @@
         <button class="btn" :disabled="busy" @click="doRestart">重启网关</button>
         <button class="btn danger" :disabled="busy" @click="doClear">清空映射表</button>
       </div>
+      <div v-if="status.storage" class="sub" style="margin-top:8px">
+        日志 {{ status.storage.events }} 条 · 已持久化映射 {{ status.storage.persistedMappings }} 条
+      </div>
       <div v-if="status.lastError" class="badge bad" style="margin-top:10px;white-space:pre-wrap">{{ status.lastError }}</div>
+      <div v-if="status.storage && status.storage.error" class="badge bad" style="margin-top:10px;white-space:pre-wrap">{{ status.storage.error }}</div>
     </div>
 
     <div class="card">
@@ -45,7 +49,7 @@ import { reactive, ref, onMounted, onBeforeUnmount } from 'vue';
 import { gw } from '@/utils/gateway';
 import { toast } from '@/utils/toast';
 
-const status = reactive({ maskEnabled: true, listening: [], upstreams: [], mappings: 0, lastError: '' });
+const status = reactive({ maskEnabled: true, listening: [], upstreams: [], mappings: 0, lastError: '', storage: null });
 const busy = ref(false);
 let timer = null;
 

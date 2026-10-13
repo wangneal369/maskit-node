@@ -2,8 +2,9 @@
   <div class="page">
     <div class="row" style="margin-bottom:16px">
       <h1 class="page-title grow" style="margin:0">日志</h1>
-      <span class="sub">最近 {{ events.length }} 条（上限 200，实时更新）</span>
+      <span class="sub">已加载 {{ events.length }} 条<template v-if="total !== null"> / 共 {{ total }} 条</template>（实时更新）</span>
       <button class="btn" @click="load">刷新</button>
+      <button class="btn danger" @click="doClear">清空日志</button>
     </div>
     <div class="card" style="padding:0;overflow:hidden">
       <table class="table">
@@ -41,6 +42,10 @@
         </tbody>
       </table>
     </div>
+    <div v-if="events.length" class="row" style="justify-content:center;margin-top:12px">
+      <button v-if="hasMore" class="btn" :disabled="loadingMore" @click="loadMore">{{ loadingMore ? '加载中...' : '加载更早' }}</button>
+      <span v-else class="sub">没有更早的记录</span>
+    </div>
   </div>
 </template>
 <script setup>
@@ -48,8 +53,12 @@ import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { gw, onGatewayEvent } from '@/utils/gateway';
 import { toast } from '@/utils/toast';
 
-const CAP = 200;
+const PAGE = 200;
+const CAP = 5000;
 const events = ref([]);
+const total = ref(null);
+const hasMore = ref(true);
+const loadingMore = ref(false);
 const open = ref(null);
 let off = () => {};
 
@@ -60,8 +69,36 @@ function fmtTime(t) {
   if (isNaN(d)) return String(t);
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
+async function loadTotal() {
+  try { const s = await gw.status(); total.value = s?.storage ? s.storage.events : null; }
+  catch { total.value = null; }
+}
 async function load() {
-  try { events.value = ((await gw.events()) || []).slice(0, CAP); }
+  try {
+    const list = (await gw.events({ limit: PAGE })) || [];
+    events.value = list.slice(0, CAP);
+    hasMore.value = list.length >= PAGE;
+    loadTotal();
+  } catch (e) { toast(e?.message || String(e), false); }
+}
+async function loadMore() {
+  const last = events.value[events.value.length - 1];
+  if (!last || loadingMore.value) return;
+  loadingMore.value = true;
+  try {
+    // 游标 (time, seq)：同一毫秒的事件跨页也不会漏；去重兜底实时推送与分页的重叠
+    const list = (await gw.events({ before: last.time, beforeSeq: last.seq, limit: PAGE })) || [];
+    const seen = new Set(events.value.map((x) => x.id));
+    const fresh = list.filter((x) => !seen.has(x.id));
+    events.value = events.value.concat(fresh).slice(0, CAP);
+    // 一页全是重复（同一毫秒事件超过一页）时停止，避免无限「加载更早」
+    hasMore.value = fresh.length > 0 && list.length >= PAGE && events.value.length < CAP;
+  } catch (e) { toast(e?.message || String(e), false); }
+  finally { loadingMore.value = false; }
+}
+async function doClear() {
+  if (!window.confirm('确定清空全部日志？此操作不可恢复。')) return;
+  try { await gw.clearEvents(); toast('日志已清空'); await load(); }
   catch (e) { toast(e?.message || String(e), false); }
 }
 
@@ -70,6 +107,7 @@ onMounted(async () => {
     const list = events.value.filter((x) => x.id !== ev.id);
     list.unshift(ev);
     events.value = list.slice(0, CAP);
+    if (total.value !== null) total.value += 1;
   });
   await load();
 });

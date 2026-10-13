@@ -12,6 +12,25 @@ export interface AppConfig {
   mask: MaskConfig;
   /** 浏览器扩展桥接 */
   ext: ExtBridgeConfig;
+  /** 本地持久化（SQLite） */
+  storage: StorageConfig;
+}
+
+export interface StorageConfig {
+  /** 占位符映射是否落盘（凭证类永不落盘） */
+  persistMappings: boolean;
+  /** 事件历史保留条数上限 */
+  maxEvents: number;
+}
+
+export const DEFAULT_STORAGE_CONFIG: StorageConfig = { persistMappings: true, maxEvents: 5000 };
+
+export function normalizeStorage(s: Partial<StorageConfig> | undefined): StorageConfig {
+  const n = Number(s?.maxEvents);
+  return {
+    persistMappings: s?.persistMappings ?? DEFAULT_STORAGE_CONFIG.persistMappings,
+    maxEvents: Number.isFinite(n) ? Math.min(100000, Math.max(100, Math.floor(n))) : DEFAULT_STORAGE_CONFIG.maxEvents,
+  };
 }
 
 export const DEFAULT_UPSTREAMS: Upstream[] = [
@@ -27,6 +46,7 @@ export function defaultConfig(): AppConfig {
     upstreams: structuredClone(DEFAULT_UPSTREAMS),
     mask: structuredClone(DEFAULT_MASK_CONFIG),
     ext: { ...DEFAULT_EXT_CONFIG },
+    storage: { ...DEFAULT_STORAGE_CONFIG },
   };
 }
 
@@ -45,6 +65,7 @@ export function loadConfig(file: string): AppConfig {
       customWords: raw.mask?.customWords ?? def.mask.customWords,
     },
     ext: normalizeExt({ ...def.ext, ...raw.ext }),
+    storage: normalizeStorage({ ...def.storage, ...raw.storage }),
   };
 }
 

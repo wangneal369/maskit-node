@@ -12,11 +12,14 @@ export const gw = {
   getConfig: () => call(ipcApiRoute.gatewayGetConfig),
   setConfig: (cfg) => call(ipcApiRoute.gatewaySetConfig, JSON.parse(JSON.stringify(cfg))),
   restart: () => call(ipcApiRoute.gatewayRestart),
-  events: () => call(ipcApiRoute.gatewayEvents),
+  events: (params) => call(ipcApiRoute.gatewayEvents, params),
+  clearEvents: () => call(ipcApiRoute.gatewayClearEvents),
   clearMappings: () => call(ipcApiRoute.gatewayClearMappings),
   rotateExtToken: () => call(ipcApiRoute.gatewayRotateExtToken),
   openExtensionDir: () => call(ipcApiRoute.gatewayOpenExtensionDir),
   playground: (text) => call(ipcApiRoute.gatewayPlayground, { text }),
+  exportSkillBundle: () => call(ipcApiRoute.gatewayExportSkillBundle),
+  skillAgentsSnippet: () => call(ipcApiRoute.gatewaySkillAgentsSnippet),
 }
 
 /** 订阅推送事件，返回取消函数 */

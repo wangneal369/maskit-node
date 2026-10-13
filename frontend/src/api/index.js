@@ -9,10 +9,13 @@ const ipcApiRoute = {
   gatewaySetConfig: 'controller/gateway/setConfig',
   gatewayRestart: 'controller/gateway/restart',
   gatewayEvents: 'controller/gateway/events',
+  gatewayClearEvents: 'controller/gateway/clearEvents',
   gatewayClearMappings: 'controller/gateway/clearMappings',
   gatewayRotateExtToken: 'controller/gateway/rotateExtToken',
   gatewayOpenExtensionDir: 'controller/gateway/openExtensionDir',
   gatewayPlayground: 'controller/gateway/playground',
+  gatewayExportSkillBundle: 'controller/gateway/exportSkillBundle',
+  gatewaySkillAgentsSnippet: 'controller/gateway/skillAgentsSnippet',
 }
 
 /** 主进程推送的事件名 */
