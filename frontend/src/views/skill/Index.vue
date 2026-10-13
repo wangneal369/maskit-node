@@ -25,6 +25,11 @@
           {{ copying ? '复制中...' : '复制 AGENTS.md 片段' }}
         </button>
       </div>
+      <div class="sub" style="margin-top:12px">
+        Claude Code 安装命令（{{ isWindows ? 'PowerShell' : '终端' }}）：{{ savedPath ? '按实际保存位置生成' : '默认按「下载」文件夹，导出到别处后会自动更新' }}
+      </div>
+      <pre class="cmd">{{ installCmd }}</pre>
+      <div class="sub">安装后重启 Claude Code，输入 <span class="mono">/skills</span> 可看到 maskit-placeholders。</div>
     </div>
 
     <div class="card">
@@ -71,12 +76,29 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { gw } from '@/utils/gateway';
 import { toast } from '@/utils/toast';
 
 const exporting = ref(false);
 const copying = ref(false);
+/** 最近一次导出的实际保存路径；未导出时命令按「下载」文件夹的默认位置生成 */
+const savedPath = ref('');
+const isWindows = navigator.userAgent.includes('Windows');
+
+/**
+ * 安装命令必须用 zip 的完整路径：终端默认在用户主目录打开，相对路径找不到下载的文件。
+ * 类 Unix 先 mkdir -p：unzip -d 只能建一层目录，~/.claude 不存在时会失败。
+ * 双引号内的 ~ 不会展开，所以默认路径用 $HOME。
+ */
+const installCmd = computed(() => {
+  if (isWindows) {
+    const zip = savedPath.value || '$env:USERPROFILE\\Downloads\\maskit-placeholders.zip';
+    return `Expand-Archive -LiteralPath "${zip}" -DestinationPath "$env:USERPROFILE\\.claude\\skills" -Force`;
+  }
+  const zip = savedPath.value || '$HOME/Downloads/maskit-placeholders.zip';
+  return `mkdir -p ~/.claude/skills && unzip -o "${zip}" -d ~/.claude/skills/`;
+});
 
 async function exportSkill() {
   exporting.value = true;
@@ -87,6 +109,7 @@ async function exportSkill() {
       return;
     }
     if (result.ok) {
+      if (result.path) savedPath.value = result.path;
       toast(`已保存到：${result.path}`);
     } else {
       toast(`导出失败：${result.error || '未知错误'}`, false);
@@ -99,13 +122,8 @@ async function exportSkill() {
 }
 
 function copyInstallCmd() {
-  const isWindows = navigator.userAgent.includes('Windows');
-  const cmd = isWindows
-    ? 'Expand-Archive .\\maskit-placeholders.zip -DestinationPath "$env:USERPROFILE\\.claude\\skills\\" -Force'
-    : 'unzip -o maskit-placeholders.zip -d ~/.claude/skills/';
-
   copying.value = true;
-  navigator.clipboard.writeText(cmd)
+  navigator.clipboard.writeText(installCmd.value)
     .then(() => {
       toast('已复制安装命令到剪贴板');
     })
@@ -132,6 +150,17 @@ async function copyAgentsSnippet() {
 </script>
 
 <style lang="less" scoped>
+.cmd {
+  margin: 6px 0 8px;
+  padding: 10px 12px;
+  background: var(--bg-soft, #f6f8fa);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 .desc {
   margin: 0 0 12px;
   line-height: 1.6;
