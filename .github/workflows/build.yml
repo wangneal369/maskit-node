@@ -96,6 +96,8 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: dist
+          # 只收安装包产物：docker/build-push-action 会额外上传 *.dockerbuild 构建记录，不应进 Release
+          pattern: DataMaskit-*
           merge-multiple: true
       - name: Zip browser extension
         run: |
