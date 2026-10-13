@@ -8,6 +8,10 @@
 你看到的:  （模型回复中的占位符被还原为原文）
 ```
 
+<p align="center">
+  <img src="docs/screenshots/playground.png" alt="试验台：脱敏与往返还原" width="90%" />
+</p>
+
 ## 功能
 
 - **18 类内置规则**：默认开启 API Key、银行卡（Luhn）、连接串密码、邮箱、身份证（校验位）、座机、手机号 7 类；私钥、JWT、Bearer Token、赋值凭据、云 AK、内网 IP、车牌、MAC、IBAN、港澳通行证等可按需开启
@@ -16,6 +20,14 @@
 - **协议感知**：只扫描业务字段，协议字段（model、role、tool_call_id 等）不改写；带签名的 thinking 块原样上行；脱敏失败直接阻断（fail-closed）
 - **流式还原**：OpenAI Chat Completions / Responses、Anthropic Messages 的 SSE 逐事件还原，跨 chunk 的半截占位符自动缓冲
 - **兜底直连**：关闭脱敏时端口仍监听并原样转发，工具不会断网
+
+## 界面
+
+| 概览 | 日志 |
+|---|---|
+| ![概览：网关状态与接入地址](docs/screenshots/dashboard.png) | ![日志：每次请求的脱敏与还原统计](docs/screenshots/events.png) |
+| **规则** | **浏览器扩展** |
+| ![规则：内置规则开关、密钥前缀、自定义词](docs/screenshots/rules.png) | ![浏览器扩展：桥接服务与访问令牌](docs/screenshots/extension.png) |
 
 ## 接入
 
