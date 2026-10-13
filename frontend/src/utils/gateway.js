@@ -20,6 +20,8 @@ export const gw = {
   playground: (text) => call(ipcApiRoute.gatewayPlayground, { text }),
   exportSkillBundle: () => call(ipcApiRoute.gatewayExportSkillBundle),
   skillAgentsSnippet: () => call(ipcApiRoute.gatewaySkillAgentsSnippet),
+  stats: (params) => call(ipcApiRoute.gatewayStats, params),
+  flagged: (params) => call(ipcApiRoute.gatewayFlagged, params),
 }
 
 /** 订阅推送事件，返回取消函数 */

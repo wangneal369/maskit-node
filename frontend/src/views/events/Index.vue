@@ -27,10 +27,19 @@
                 <span v-else-if="ev.restored" class="badge ok">已还原 {{ ev.restored }}</span>
                 <span v-else class="sub">-</span>
               </td>
-              <td style="color:var(--danger);max-width:160px;word-break:break-all">{{ ev.error || '' }}</td>
+              <td style="color:var(--danger);max-width:160px;word-break:break-all">
+                {{ ev.error || '' }}
+                <span v-if="ev.findings?.length" class="badge warn" style="margin-left:8px">⚠ 风险 {{ ev.findings.length }}</span>
+                <span v-if="ev.commands?.length" class="badge bad" style="margin-left:4px">⛔ 命令 {{ ev.commands.length }}</span>
+              </td>
             </tr>
             <tr v-if="open === ev.id" class="detail">
               <td colspan="9">
+                <div v-if="ev.model" class="sub" style="margin-bottom:6px">模型：<span class="mono">{{ ev.model }}</span></div>
+                <div v-if="ev.usage" class="sub" style="margin-bottom:6px">
+                  Tokens：<span class="mono">{{ ev.usage.input }} 输入 · {{ ev.usage.output }} 输出 · {{ ev.usage.cacheRead }} 缓存读 · {{ ev.usage.cacheWrite }} 缓存写</span>
+                  <span v-if="ev.cost" style="margin-left:12px">费用：<span class="mono" style="color:var(--warn)">${{ ev.cost.toFixed(4) }}</span></span>
+                </div>
                 <div v-if="ev.signedBlocksSkipped" class="sub" style="margin-bottom:6px">跳过签名块：{{ ev.signedBlocksSkipped }}</div>
                 <div v-if="!ev.hits?.length" class="sub">本次请求无命中</div>
                 <div v-else class="row wrap">

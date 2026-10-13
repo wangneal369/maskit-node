@@ -6,4 +6,5 @@ export { maskJson } from './tree';
 export { maskBody, type BodyMaskResult } from './body';
 export { DEFAULT_BUILTIN_RULES, DEFAULT_SECRET_PREFIXES, type RuleLabel } from './rules';
 export { CREDENTIAL_LABELS, isCredentialLabel } from './credential-labels';
+export { scanErrorLeak, scanResponsePoison, type AuditFinding, type Severity } from './audit';
 export type { PersistedMapping, StorePersistHooks, StoreOptions } from './store';

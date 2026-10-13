@@ -5,6 +5,31 @@
  * 跨 chunk 的半截占位符由 Restorer 按通道扣留，通道结束时补发一个合成增量事件吐出残留。
  */
 import type { Restorer } from './restorer';
+import { mapToolArgs } from './tool-args';
+
+/** 工具参数闸门的处理结果 */
+export interface ToolGateResult {
+  text: string;
+  block: boolean;
+}
+
+export interface SseHooks {
+  /** 每个已解析事件（还原前）回调，用于提取用量 */
+  onData?(data: unknown): void;
+  /** 还原后的文本：tool = 是否工具参数通道。用于审计与命令「仅记录」模式 */
+  onText?(channel: string, text: string, tool: boolean): void;
+  /**
+   * 工具参数闸门（命令改写 / 阻断模式才提供）：工具参数通道整段缓冲到通道结束再交给它，
+   * 客户端本来也要等参数完整才执行，缓冲几乎不影响体验，但检测才可靠（命令不会被切在两个 chunk 里）。
+   */
+  toolGate?(channel: string, args: string): ToolGateResult;
+}
+
+/** 阻断时下发给客户端的错误事件 */
+const BLOCK_EVENT = `event: error\ndata: ${JSON.stringify({
+  type: 'error',
+  error: { type: 'maskit_command_blocked', message: 'Data Maskit 已阻断模型下发的危险命令' },
+})}\n\n`;
 
 type Path = (string | number)[];
 
@@ -116,11 +141,20 @@ function syntheticDelta(tpl: Template, text: string): unknown {
 export class SseRestorer {
   private buf = '';
   private readonly templates = new Map<string, Template>();
+  /** 闸门模式下缓冲中的工具参数（已还原） */
+  private readonly toolBufs = new Map<string, string>();
+  private isBlocked = false;
 
-  constructor(private readonly restorer: Restorer) {}
+  constructor(private readonly restorer: Restorer, private readonly hooks: SseHooks = {}) {}
+
+  /** 已因危险命令阻断：调用方应停止转发并结束响应 */
+  get blocked(): boolean {
+    return this.isBlocked;
+  }
 
   /** 喂入一段解码后的文本，返回可立即下发的文本（不完整的事件留在缓冲区）。 */
   push(chunk: string): string {
+    if (this.isBlocked) return '';
     this.buf += chunk;
     let out = '';
     for (;;) {
@@ -128,17 +162,21 @@ export class SseRestorer {
       if (!m) break;
       const block = this.buf.slice(0, m.index);
       this.buf = this.buf.slice(m.index + m[0].length);
-      out += this.handleEvent(block) + m[0];
+      const handled = this.handleEvent(block);
+      // 阻断：已下发的内容保留，本事件起改为错误事件并终止
+      if (this.isBlocked) return out + BLOCK_EVENT;
+      out += handled + m[0];
     }
     return out;
   }
 
   /** 流结束：处理残留的半个事件，并吐出所有通道的扣留内容。 */
   end(): string {
+    if (this.isBlocked) return '';
     let out = this.buf ? this.handleEvent(this.buf) : '';
     this.buf = '';
     out += this.flushChannels(null);
-    return out;
+    return this.isBlocked ? BLOCK_EVENT : out;
   }
 
   private handleEvent(block: string): string {
@@ -154,7 +192,9 @@ export class SseRestorer {
     } catch {
       return block;
     }
+    this.hooks.onData?.(data);
     const slots = sseTextSlots(data);
+    const gate = this.hooks.toolGate;
     const term = terminalPrefixes(data);
     const ends = (ch: string) => term === null || term.some((p) => ch.startsWith(p));
     // 先吐出「更早事件」扣留的残留：它们在本事件之前，顺序不能反
@@ -166,25 +206,62 @@ export class SseRestorer {
         const text = getAt(data, s.path) as string;
         this.templates.set(s.channel, { head, data: raw, path: s.path, escape: s.escape });
         // 本事件自身就是该通道的终点：直接 final，残留紧跟本段文本
-        setAt(data, s.path, this.restorer.restore(text, s.channel, s.escape, ends(s.channel)));
+        const restored = this.restorer.restore(text, s.channel, s.escape, ends(s.channel));
+        if (s.escape && gate) {
+          // 工具参数先缓冲；通道在本事件结束时就地放行（经闸门处理）
+          const acc = (this.toolBufs.get(s.channel) ?? '') + restored;
+          if (ends(s.channel)) {
+            this.toolBufs.delete(s.channel);
+            setAt(data, s.path, this.applyGate(s.channel, acc));
+          } else {
+            this.toolBufs.set(s.channel, acc);
+            setAt(data, s.path, '');
+          }
+        } else {
+          if (restored) this.hooks.onText?.(s.channel, restored, s.escape);
+          setAt(data, s.path, restored);
+        }
       }
     } else {
-      // 非增量事件（如 response.completed 携带完整结果）：整棵还原
+      // 非增量事件（如 response.completed 携带完整结果）：整棵还原。
+      // 闸门模式下这类整包事件里的完整工具参数也必须过闸，否则危险命令会从这里漏出去
       data = this.restorer.restoreTree(data);
+      if (gate) data = mapToolArgs(data, (args) => this.applyGate('tree', args));
     }
     return prefix + this.render(head, data);
+  }
+
+  /** 交给闸门；阻断时置位并返回空串（调用方随后下发错误事件并停止） */
+  private applyGate(channel: string, args: string): string {
+    if (!args || !this.hooks.toolGate) return args;
+    this.hooks.onText?.(channel, args, true);
+    const r = this.hooks.toolGate(channel, args);
+    if (r.block) {
+      this.isBlocked = true;
+      return '';
+    }
+    return r.text;
   }
 
   /** 为已结束且有扣留的通道补发合成增量事件。 */
   private flushChannels(prefixes: string[] | null, except?: Set<string>): string {
     let out = '';
+    const matches = (ch: string) => !except?.has(ch) && (!prefixes || prefixes.some((p) => ch.startsWith(p)));
+    // 闸门缓冲的工具参数：连同扣留残留一起过闸后整段补发
+    for (const [ch, acc] of [...this.toolBufs]) {
+      if (!matches(ch)) continue;
+      this.toolBufs.delete(ch);
+      const tpl = this.templates.get(ch);
+      const gated = this.applyGate(ch, acc + this.restorer.flush(ch, tpl?.escape ?? true));
+      if (tpl && gated) out += `${this.render(tpl.head, syntheticDelta(tpl, gated))}\n\n`;
+    }
     for (const ch of this.restorer.pendingChannels()) {
-      if (except?.has(ch)) continue;
-      if (prefixes && !prefixes.some((p) => ch.startsWith(p))) continue;
+      if (!matches(ch)) continue;
       const tpl = this.templates.get(ch);
       if (!tpl) continue;
       const left = this.restorer.flush(ch, tpl.escape);
       if (!left) continue;
+      this.hooks.onText?.(ch, left, tpl.escape);
       out += `${this.render(tpl.head, syntheticDelta(tpl, left))}\n\n`;
     }
     return out;

@@ -4,10 +4,18 @@ import { logger } from 'ee-core/log';
 import { getDataDir } from 'ee-core/ps';
 import { getMainWindow } from 'ee-core/electron';
 import { maskJson, Masker, MappingStore, Restorer, type PersistedMapping } from '../core';
-import { loadConfig, normalizeExt, normalizeStorage, saveConfig, type AppConfig } from '../gateway/config';
+import { CommandScanner } from '../core/command-block';
+import { loadConfig, normalizeConfig, saveConfig, type AppConfig } from '../gateway/config';
 import { ExtBridge, generateExtToken } from '../gateway/ext-bridge';
 import { Gateway, type GatewayEvent } from '../gateway/proxy';
 import { MaskitDb } from '../storage/db';
+
+/** 分页游标：上一页最老一条的 (time, seq) */
+interface PageArgs {
+  before?: number;
+  beforeSeq?: number;
+  limit?: number;
+}
 
 /** 内存兜底事件列表上限（DB 不可用时 events() 仍可用） */
 const MAX_EVENTS = 200;
@@ -199,6 +207,11 @@ class GatewayService {
   private async apply(): Promise<void> {
     this.masker.configure(this.config.mask);
     this.gateway.maskEnabled = this.config.maskEnabled;
+    this.gateway.policy = {
+      commands: new CommandScanner(this.config.commandBlock),
+      auditEnabled: this.config.audit.enabled,
+      prices: this.config.prices,
+    };
     const probe = this.config.upstreams[0]?.target ?? 'https://api.openai.com';
     try {
       this.gateway.setEgressProxy(await resolveEgressProxy(this.config.egressProxy, probe));
@@ -277,7 +290,7 @@ class GatewayService {
   async setConfig(next: AppConfig): Promise<void> {
     const portsChanged = JSON.stringify(next.upstreams) !== JSON.stringify(this.config.upstreams);
     const wasPersist = this.config.storage.persistMappings;
-    this.config = { ...next, ext: normalizeExt(next.ext), storage: normalizeStorage(next.storage) };
+    this.config = normalizeConfig(next);
     saveConfig(this.configFile, this.config);
     this.applyStorage(wasPersist);
     await this.apply();
@@ -304,7 +317,20 @@ class GatewayService {
   }
 
   /** 新→旧分页；游标为上一页最老一条的 (time, seq)。DB 不可用时退回内存列表。 */
-  listEvents(args?: { before?: number; beforeSeq?: number; limit?: number }): GatewayEvent[] {
+  listEvents(args?: PageArgs): GatewayEvent[] {
+    return this.page(args, (db, p) => db.listEvents(p), () => true);
+  }
+
+  /** 风险列表：带审计发现或命中危险命令的事件，分页同 listEvents */
+  listFlagged(args?: PageArgs): GatewayEvent[] {
+    return this.page(args, (db, p) => db.listFlagged(p), (ev) => !!(ev.findings?.length || ev.commands?.length));
+  }
+
+  private page(
+    args: PageArgs | undefined,
+    query: (db: MaskitDb, p: { before?: number; beforeSeq?: number; limit: number }) => GatewayEvent[],
+    memFilter: (ev: GatewayEvent) => boolean,
+  ): GatewayEvent[] {
     const raw = Number(args?.limit);
     const limit = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), EVENTS_MAX_LIMIT) : EVENTS_DEFAULT_LIMIT;
     const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
@@ -312,14 +338,29 @@ class GatewayService {
     const beforeSeq = num(args?.beforeSeq);
     if (this.db) {
       try {
-        return this.db.listEvents({ before, beforeSeq, limit });
+        return query(this.db, { before, beforeSeq, limit });
       } catch (e) {
         this.reportStorageError('events', e);
       }
     }
     const older = (ev: GatewayEvent) => ev.time < before! || (ev.time === before && beforeSeq !== undefined && (ev.seq ?? 0) < beforeSeq);
-    const list = before === undefined ? this.events : this.events.filter(older);
-    return list.slice(0, limit);
+    return this.events.filter((ev) => memFilter(ev) && (before === undefined || older(ev))).slice(0, limit);
+  }
+
+  /** 用量统计：最近 days 天（按本机时区分日）；DB 不可用时返回空 */
+  stats(days: number) {
+    const d = Number.isFinite(days) ? Math.min(366, Math.max(1, Math.floor(days))) : 30;
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - (d - 1));
+    if (this.db) {
+      try {
+        return this.db.stats({ sinceMs: start.getTime(), tzOffsetMin: -new Date().getTimezoneOffset() });
+      } catch (e) {
+        this.reportStorageError('stats', e);
+      }
+    }
+    return { daily: [], byModel: [] };
   }
 
   clearEvents(): void {

@@ -8,6 +8,7 @@ import path from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { isCredentialLabel } from '../core/credential-labels';
 import type { GatewayEvent } from '../gateway/proxy';
+import type { Usage } from '../core/usage';
 
 export interface MappingRow {
   token: string;
@@ -17,7 +18,16 @@ export interface MappingRow {
   pinned: boolean;
 }
 
-const SCHEMA_VERSION = 1;
+/** 存储层扩展 GatewayEvent，添加 LLM 用量与定价信息 */
+type StoredEvent = GatewayEvent & {
+  model?: string;
+  usage?: Usage;
+  cost?: number;
+  findings?: unknown[];
+  commands?: unknown[];
+};
+
+const SCHEMA_VERSION = 2;
 
 export class MaskitDb {
   private readonly db: DatabaseSync;
@@ -28,6 +38,8 @@ export class MaskitDb {
   private readonly stListEv: StatementSync;
   private readonly stListEvBefore: StatementSync;
   private readonly stListEvCursor: StatementSync;
+  private readonly stListFlagged: StatementSync;
+  private readonly stListFlaggedCursor: StatementSync;
   private readonly stTrim: StatementSync;
 
   constructor(file: string) {
@@ -45,7 +57,10 @@ export class MaskitDb {
     this.stLoad = this.db.prepare(
       'SELECT token, orig, label, last_used, pinned FROM mappings WHERE last_used >= ? OR pinned = 1 ORDER BY last_used DESC LIMIT ?',
     );
-    this.stInsertEv = this.db.prepare('INSERT OR REPLACE INTO events (id, time, json) VALUES (?, ?, ?)');
+    this.stInsertEv = this.db.prepare(
+      `INSERT OR REPLACE INTO events (id, time, json, model, input_tokens, output_tokens, cache_read, cache_write, cost, flagged)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
     // 排序键 (time, rowid) 唯一，分页用 keyset 游标；只给 time 时退化为严格小于
     this.stListEv = this.db.prepare('SELECT rowid AS seq, json FROM events ORDER BY time DESC, rowid DESC LIMIT ?');
     this.stListEvBefore = this.db.prepare(
@@ -53,6 +68,12 @@ export class MaskitDb {
     );
     this.stListEvCursor = this.db.prepare(
       'SELECT rowid AS seq, json FROM events WHERE time < ? OR (time = ? AND rowid < ?) ORDER BY time DESC, rowid DESC LIMIT ?',
+    );
+    this.stListFlagged = this.db.prepare(
+      'SELECT rowid AS seq, json FROM events WHERE flagged = 1 ORDER BY time DESC, rowid DESC LIMIT ?',
+    );
+    this.stListFlaggedCursor = this.db.prepare(
+      'SELECT rowid AS seq, json FROM events WHERE flagged = 1 AND (time < ? OR (time = ? AND rowid < ?)) ORDER BY time DESC, rowid DESC LIMIT ?',
     );
     this.stTrim = this.db.prepare(
       'DELETE FROM events WHERE rowid NOT IN (SELECT rowid FROM events ORDER BY time DESC, rowid DESC LIMIT ?)',
@@ -75,6 +96,25 @@ export class MaskitDb {
           id TEXT PRIMARY KEY, time INTEGER NOT NULL, json TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_events_time ON events(time);
+      `);
+    }
+    // 版本 1 → 2：添加 LLM 用量与定价字段（同时确保 mappings 表存在）
+    if (row.user_version < 2) {
+      // 确保 mappings 表存在（若未创建）
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS mappings (
+          token TEXT PRIMARY KEY, orig TEXT NOT NULL, label TEXT NOT NULL,
+          last_used INTEGER NOT NULL, pinned INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_mappings_last_used ON mappings(last_used);
+        ALTER TABLE events ADD COLUMN model TEXT;
+        ALTER TABLE events ADD COLUMN input_tokens INTEGER DEFAULT 0;
+        ALTER TABLE events ADD COLUMN output_tokens INTEGER DEFAULT 0;
+        ALTER TABLE events ADD COLUMN cache_read INTEGER DEFAULT 0;
+        ALTER TABLE events ADD COLUMN cache_write INTEGER DEFAULT 0;
+        ALTER TABLE events ADD COLUMN cost REAL;
+        ALTER TABLE events ADD COLUMN flagged INTEGER DEFAULT 0;
+        CREATE INDEX IF NOT EXISTS idx_events_flagged_time ON events(flagged, time);
       `);
     }
     this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
@@ -128,9 +168,27 @@ export class MaskitDb {
   }
 
   /** 写入事件，返回其落库序号（rowid），用作分页游标的第二键 */
-  insertEvent(ev: GatewayEvent): number {
+  insertEvent(ev: GatewayEvent & Partial<StoredEvent>): number {
+    // json 存完整事件（除 seq，它由 rowid 给出）；统计列只是冗余索引，读回事件仍以 json 为准
     const { seq: _seq, ...rest } = ev;
-    return Number(this.stInsertEv.run(ev.id, ev.time, JSON.stringify(rest)).lastInsertRowid);
+    const { model, usage, cost, findings, commands } = ev;
+    // flagged = 1 当有 findings 或 commands
+    const flagged = findings?.length || commands?.length ? 1 : 0;
+    return Number(
+      this.stInsertEv.run(
+        ev.id,
+        ev.time,
+        JSON.stringify(rest),
+        model || null,
+        usage?.input || 0,
+        usage?.output || 0,
+        usage?.cacheRead || 0,
+        usage?.cacheWrite || 0,
+        // 0 是真实费用，只有缺省才算「无价格」
+        cost ?? null,
+        flagged,
+      ).lastInsertRowid,
+    );
   }
 
   /**
@@ -155,6 +213,93 @@ export class MaskitDb {
 
   clearEvents(): void {
     this.db.exec('DELETE FROM events');
+  }
+
+  /**
+   * 列举标记事件（有 findings 或 commands）。
+   * 使用 keyset 分页（cursor = (time, seq)），新→旧排序。
+   */
+  listFlagged(opts: { before?: number; beforeSeq?: number; limit: number }): GatewayEvent[] {
+    let rows: { seq: number; json: string }[];
+    if (opts.before === undefined) rows = this.stListFlagged.all(opts.limit) as typeof rows;
+    else if (opts.beforeSeq === undefined)
+      rows = this.db.prepare(
+        'SELECT rowid AS seq, json FROM events WHERE flagged = 1 AND time < ? ORDER BY time DESC, rowid DESC LIMIT ?',
+      ).all(opts.before, opts.limit) as typeof rows;
+    else rows = this.stListFlaggedCursor.all(opts.before, opts.before, opts.beforeSeq, opts.limit) as typeof rows;
+    return rows.map((r) => ({ ...(JSON.parse(r.json) as GatewayEvent), seq: Number(r.seq) }));
+  }
+
+  /** 统计标记事件数 */
+  countFlagged(): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM events WHERE flagged = 1').get() as { n: number }).n;
+  }
+
+  /**
+   * 统计信息：日均请求数、输入输出 token 数、费用；按模型聚合。
+   * tzOffsetMin = -new Date().getTimezoneOffset()，用于本地日期计算。
+   */
+  stats(opts: { sinceMs: number; tzOffsetMin: number }): {
+    daily: { date: string; requests: number; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number }[];
+    byModel: { model: string; requests: number; input: number; output: number; cost: number; unpriced: number }[];
+  } {
+    const tzOffsetSec = opts.tzOffsetMin * 60;
+
+    // 日均统计
+    const dailyRows = this.db
+      .prepare(
+        `
+      SELECT
+        date(time / 1000 + ?, 'unixepoch') AS date,
+        COUNT(CASE WHEN model IS NOT NULL THEN 1 END) AS requests,
+        COALESCE(SUM(input_tokens), 0) AS input,
+        COALESCE(SUM(output_tokens), 0) AS output,
+        COALESCE(SUM(cache_read), 0) AS cacheRead,
+        COALESCE(SUM(cache_write), 0) AS cacheWrite,
+        COALESCE(SUM(cost), 0) AS cost
+      FROM events
+      WHERE time >= ?
+      GROUP BY date
+      ORDER BY date DESC
+    `,
+      )
+      .all(tzOffsetSec, opts.sinceMs) as {
+        date: string;
+        requests: number;
+        input: number;
+        output: number;
+        cacheRead: number;
+        cacheWrite: number;
+        cost: number;
+      }[];
+
+    // 按模型聚合
+    const byModelRows = this.db
+      .prepare(
+        `
+      SELECT
+        COALESCE(model, 'unknown') AS model,
+        COUNT(CASE WHEN model IS NOT NULL THEN 1 END) AS requests,
+        COALESCE(SUM(input_tokens), 0) AS input,
+        COALESCE(SUM(output_tokens), 0) AS output,
+        COALESCE(SUM(cost), 0) AS cost,
+        COUNT(CASE WHEN (input_tokens > 0 OR output_tokens > 0) AND cost IS NULL THEN 1 END) AS unpriced
+      FROM events
+      WHERE time >= ? AND model IS NOT NULL
+      GROUP BY model
+      ORDER BY requests DESC
+    `,
+      )
+      .all(opts.sinceMs) as {
+        model: string;
+        requests: number;
+        input: number;
+        output: number;
+        cost: number;
+        unpriced: number;
+      }[];
+
+    return { daily: dailyRows, byModel: byModelRows };
   }
 
   close(): void {

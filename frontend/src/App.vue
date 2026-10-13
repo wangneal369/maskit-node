@@ -22,6 +22,8 @@ const navs = [
   { to: '/dashboard', text: '概览', ico: '◉' },
   { to: '/playground', text: '试验台', ico: '✎' },
   { to: '/events', text: '日志', ico: '≡' },
+  { to: '/usage', text: '用量', ico: '📊' },
+  { to: '/risk', text: '风险', ico: '⚠' },
   { to: '/rules', text: '规则', ico: '⚙' },
   { to: '/extension', text: '浏览器扩展', ico: '⊕' },
   { to: '/skill', text: '编程助手', ico: '◆' },

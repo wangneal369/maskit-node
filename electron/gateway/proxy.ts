@@ -11,6 +11,10 @@ import { randomUUID } from 'node:crypto';
 import zlib from 'node:zlib';
 import { Agent, fetch, ProxyAgent, type Dispatcher, type Response } from 'undici';
 import { maskJson, Masker, Restorer, SseRestorer } from '../core';
+import type { AuditFinding } from '../core/audit';
+import { CommandScanner, DEFAULT_COMMAND_BLOCK } from '../core/command-block';
+import { modelFromJson, type Usage } from '../core/usage';
+import { ResponseInspector, type CommandRecord, type InspectPolicy } from './inspect';
 
 export interface Upstream {
   name: string;
@@ -38,6 +42,16 @@ export interface GatewayEvent {
   error?: string;
   /** 落库序号（同一毫秒内的先后），与 time 一起组成分页游标；由服务层写入 */
   seq?: number;
+  /** 经容错形态或标签兼容回退才还原成功的次数 */
+  degraded?: number;
+  model?: string;
+  usage?: Usage;
+  /** 估算费用（USD），无价格时缺省 */
+  cost?: number;
+  /** 被动审计发现 */
+  findings?: AuditFinding[];
+  /** 命中的危险命令 */
+  commands?: CommandRecord[];
 }
 
 const MAX_BODY = 32 * 1024 * 1024;
@@ -138,6 +152,8 @@ export class Gateway extends EventEmitter {
   egressProxy: string | null = null;
   private dispatcher: Dispatcher = new Agent();
   private readonly direct = new Agent();
+  /** 响应检查策略：命令拦截、审计、价格（配置变更时整体替换） */
+  policy: InspectPolicy = { commands: new CommandScanner(DEFAULT_COMMAND_BLOCK), auditEnabled: true, prices: {} };
 
   constructor(private readonly masker: Masker) {
     super();
@@ -205,9 +221,13 @@ export class Gateway extends EventEmitter {
         return;
       }
     }
+    let inspector: ResponseInspector | undefined;
     if (isTarget && body.length) {
       try {
-        const result = maskJson(this.masker, JSON.parse(body.toString('utf8')));
+        const requestText = body.toString('utf8');
+        const parsed = JSON.parse(requestText);
+        inspector = new ResponseInspector(this.policy, requestText, modelFromJson(parsed));
+        const result = maskJson(this.masker, parsed);
         // 没命中就一个字节都不改，保住上游前缀缓存
         if (result.changed) body = Buffer.from(JSON.stringify(result.body), 'utf8');
         ev.hits = result.hits.map(({ label, token }) => ({ label, token }));
@@ -271,25 +291,42 @@ export class Gateway extends EventEmitter {
         ev.stream = true;
         res.writeHead(upstreamRes.status, resHeaders);
         res.flushHeaders();
-        const sse = new SseRestorer(restorer);
+        const sse = new SseRestorer(restorer, inspector?.sseHooks());
         const decoder = new TextDecoder();
         for await (const c of upstreamRes.body) {
           const out = sse.push(decoder.decode(c, { stream: true }));
           if (out) res.write(out);
+          // 危险命令阻断：错误事件已随 out 下发，停止读上游
+          if (sse.blocked) break;
         }
-        res.end(sse.push(decoder.decode()) + sse.end());
+        if (sse.blocked) {
+          ev.error = 'command_blocked';
+          res.end();
+        } else {
+          res.end(sse.push(decoder.decode()) + sse.end());
+          if (sse.blocked) ev.error = 'command_blocked';
+        }
       } else {
         const raw = Buffer.from(await upstreamRes.arrayBuffer()).toString('utf8');
         let out = raw;
+        if (upstreamRes.status >= 400) inspector?.inspectError(upstreamRes.status, raw);
         if (ct.includes('json')) {
           try {
-            out = JSON.stringify(restorer.restoreTree(JSON.parse(raw)));
+            const parsed = JSON.parse(raw);
+            const restored = restorer.restoreTree(parsed);
+            out = JSON.stringify(inspector ? inspector.inspectJson(restored, parsed) : restored);
           } catch {
             out = restorer.restore(raw, '', false, true);
           }
         }
-        res.writeHead(upstreamRes.status, resHeaders);
-        res.end(out);
+        if (inspector?.blocked) {
+          ev.error = 'command_blocked';
+          ev.status = 503;
+          sendJsonError(res, 503, 'Data Maskit 已阻断模型下发的危险命令（可在「规则 → 危险命令拦截」调整）');
+        } else {
+          res.writeHead(upstreamRes.status, resHeaders);
+          res.end(out);
+        }
       }
     } catch (e) {
       ev.error = abort.signal.aborted ? 'client_cancelled' : `stream_failed: ${(e as Error).message}`;
@@ -297,6 +334,8 @@ export class Gateway extends EventEmitter {
     }
     ev.restored = restorer.stats.restored;
     ev.unresolved = restorer.stats.unresolved;
+    if (restorer.stats.degraded) ev.degraded = restorer.stats.degraded;
+    inspector?.finish(ev);
     this.finish(ev, started);
   }
 

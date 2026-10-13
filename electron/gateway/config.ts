@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_MASK_CONFIG, type MaskConfig } from '../core';
+import { DEFAULT_COMMAND_BLOCK, normalizeCommandBlock, type CommandBlockConfig } from '../core/command-block';
+import type { ModelPrice } from '../core/usage';
 import { DEFAULT_EXT_CONFIG, generateExtToken, type ExtBridgeConfig } from './ext-bridge';
 import type { Upstream } from './proxy';
 
@@ -14,6 +16,31 @@ export interface AppConfig {
   ext: ExtBridgeConfig;
   /** 本地持久化（SQLite） */
   storage: StorageConfig;
+  /** 危险命令拦截 */
+  commandBlock: CommandBlockConfig;
+  /** 被动审计（只标记不拦截） */
+  audit: { enabled: boolean };
+  /** 用户覆盖的模型价格（USD / 1M tokens），优先于内置参考价 */
+  prices: Record<string, ModelPrice>;
+}
+
+/** 价格覆盖：只保留非负数字，模型名去空白；非法条目丢弃 */
+export function normalizePrices(raw: unknown): Record<string, ModelPrice> {
+  const out: Record<string, ModelPrice> = {};
+  if (!raw || typeof raw !== 'object') return out;
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
+  for (const [model, p] of Object.entries(raw as Record<string, Partial<ModelPrice>>)) {
+    const name = model.trim();
+    const input = num(p?.input);
+    const output = num(p?.output);
+    if (!name || input === undefined || output === undefined) continue;
+    out[name] = { input, output };
+    const cr = num(p?.cacheRead);
+    const cw = num(p?.cacheWrite);
+    if (cr !== undefined) out[name].cacheRead = cr;
+    if (cw !== undefined) out[name].cacheWrite = cw;
+  }
+  return out;
 }
 
 export interface StorageConfig {
@@ -47,6 +74,21 @@ export function defaultConfig(): AppConfig {
     mask: structuredClone(DEFAULT_MASK_CONFIG),
     ext: { ...DEFAULT_EXT_CONFIG },
     storage: { ...DEFAULT_STORAGE_CONFIG },
+    commandBlock: structuredClone(DEFAULT_COMMAND_BLOCK),
+    audit: { enabled: true },
+    prices: {},
+  };
+}
+
+/** 保存前统一规范化：外部（界面）传入的配置不可信 */
+export function normalizeConfig(c: AppConfig): AppConfig {
+  return {
+    ...c,
+    ext: normalizeExt(c.ext),
+    storage: normalizeStorage(c.storage),
+    commandBlock: normalizeCommandBlock(c.commandBlock),
+    audit: { enabled: c.audit?.enabled !== false },
+    prices: normalizePrices(c.prices),
   };
 }
 
@@ -66,6 +108,9 @@ export function loadConfig(file: string): AppConfig {
     },
     ext: normalizeExt({ ...def.ext, ...raw.ext }),
     storage: normalizeStorage({ ...def.storage, ...raw.storage }),
+    commandBlock: normalizeCommandBlock(raw.commandBlock),
+    audit: { enabled: raw.audit?.enabled !== false },
+    prices: normalizePrices(raw.prices),
   };
 }
 

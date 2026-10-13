@@ -16,6 +16,8 @@ const ipcApiRoute = {
   gatewayPlayground: 'controller/gateway/playground',
   gatewayExportSkillBundle: 'controller/gateway/exportSkillBundle',
   gatewaySkillAgentsSnippet: 'controller/gateway/skillAgentsSnippet',
+  gatewayStats: 'controller/gateway/stats',
+  gatewayFlagged: 'controller/gateway/flagged',
 }
 
 /** 主进程推送的事件名 */

@@ -53,6 +53,14 @@ class GatewayController {
     return gatewayService.status();
   }
 
+  async flagged(args?: { before?: number; beforeSeq?: number; limit?: number }) {
+    return gatewayService.listFlagged(args);
+  }
+
+  async stats(args?: { days?: number }) {
+    return gatewayService.stats(Number(args?.days ?? 30));
+  }
+
   async clearMappings() {
     gatewayService.clearMappings();
     return gatewayService.status();
