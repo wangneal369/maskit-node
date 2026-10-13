@@ -1,5 +1,5 @@
 /**
- * 文本脱敏（对应 Python 版 _mask_text 的确定性部分：前缀凭据 → 自定义词 → 内置规则）。
+ * 文本脱敏（确定性部分：前缀凭据 → 自定义词 → 内置规则）。
  */
 import { mapOutsidePlaceholders } from './placeholder';
 import {

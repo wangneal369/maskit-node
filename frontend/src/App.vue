@@ -7,7 +7,7 @@
       </router-link>
     </aside>
     <main class="main">
-      <div v-if="!isEE" class="banner">未在 Electron 环境中运行：当前为浏览器预览，网关功能不可用。</div>
+      <div v-if="!isElectron" class="banner">未在 Electron 环境中运行：当前为浏览器预览，网关功能不可用。</div>
       <router-view />
     </main>
     <div v-if="toastState.show" class="toast" :class="toastState.ok ? 'ok' : 'bad'">{{ toastState.text }}</div>
@@ -15,7 +15,7 @@
 </template>
 <script setup>
 import { onMounted } from 'vue';
-import { isEE } from '@/utils/ipcRenderer';
+import { isElectron } from '@/utils/ipcRenderer';
 import { toastState } from '@/utils/toast';
 
 const navs = [

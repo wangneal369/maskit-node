@@ -27,8 +27,7 @@
     "LLM",
     "privacy",
     "data-masking",
-    "Electron",
-    "electron-egg"
+    "Electron"
   ],
   "author": "wangneal369 <wangneal369@users.noreply.github.com>",
   "license": "AGPL-3.0-only",

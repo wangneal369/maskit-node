@@ -1,4 +1,4 @@
-/* Data Maskit Browser Bridge — ISOLATED world 中继层
+/* Data Maskit Extension — ISOLATED world 中继层
  *
  * 唯一职责：把 MAIN world 的 postMessage 请求转成 chrome.runtime.sendMessage 发给 SW，
  * 再把 SW 的响应原路回程。**不做任何判定、不做任何缓存、不碰 token**。

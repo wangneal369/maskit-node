@@ -1,4 +1,4 @@
-/* Data Maskit Browser Bridge — MAIN world hook 层
+/* Data Maskit Extension — MAIN world hook 层
  *
  * 跑在**页面上下文**（world:"MAIN", run_at:"document_start"，实测先于页面脚本 hook 成功）。
  * 这里没有 chrome.* 特权，所有特权操作经 postMessage（带 nonce）转给 ISOLATED 层。

@@ -23,11 +23,11 @@ const Renderer = (window.require && window.require('electron')) || window.electr
 const ipc = Renderer.ipcRenderer || undefined;
 
 /**
- * 是否为EE环境
+ * 是否运行在 Electron 中
  */
-const isEE = ipc ? true : false;
+const isElectron = ipc ? true : false;
 
 export {
-  Renderer, ipc, isEE
+  Renderer, ipc, isElectron
 };
 

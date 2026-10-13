@@ -97,7 +97,7 @@ describe('默认开启的规则', () => {
     const out = mk().mask('座机 010-62345678 请拨');
     expect(out).not.toContain('010-62345678');
     expect(out).toMatch(/\{\{LANDLINE_/);
-    // 本地号首位为 1 不是合法座机（与 Python 版 _landline_ok 一致），不应命中
+    // 本地号首位为 1 不是合法座机，不应命中
     expect(mk().mask('010-12345678')).toBe('010-12345678');
   });
 

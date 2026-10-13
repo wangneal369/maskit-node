@@ -1,5 +1,5 @@
 /**
- * 请求体文本脱敏（对应 Python 版 mask_body）：JSON 体走协议感知的 maskJson，其余整段扫描。
+ * 请求体文本脱敏：JSON 体走协议感知的 maskJson，其余整段扫描。
  * 零命中时逐字节原样返回，保住上游前缀缓存。
  */
 import type { Masker, MaskHit } from './masker';

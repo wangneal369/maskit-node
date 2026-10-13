@@ -1,5 +1,5 @@
 /**
- * 内置扫描规则（移植自 engine/transparent.py RULES / shield_defaults.py）。
+ * 内置扫描规则。
  * 顺序有语义：CONNSTR 必须排在 EMAIL 之前（EMAIL 要避让被豁免的连接串区间）。
  */
 import {
@@ -101,7 +101,7 @@ export const RULE_MARKERS: Partial<Record<RuleLabel, string[]>> = {
   IP_INTERNAL: ['10.', '172.'],
 };
 
-/** 默认开启 7 类核心规则，其余按需开启（与原项目一致）。 */
+/** 默认开启 7 类核心规则，其余按需开启。 */
 export const DEFAULT_BUILTIN_RULES: Record<RuleLabel, boolean> = {
   API_KEY: true, CARD: true, CONNSTR: true, EMAIL: true, IDCARD: true, LANDLINE: true, PHONE: true,
   ACCESS_KEY: false, HKID: false, IBAN: false, IP_INTERNAL: false, IP_PRIVATE: false,

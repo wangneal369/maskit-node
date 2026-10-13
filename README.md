@@ -2,8 +2,6 @@
 
 本地运行的大模型隐私脱敏网关：请求出网前把敏感信息替换为结构化占位符，模型回复时在本地流式还原。全部运算在本机完成，无遥测。
 
-本项目是 [xiaYuTian11/maskit](https://github.com/xiaYuTian11/maskit)（Python + Tauri）的 Node.js 移植版，桌面端基于 [electron-egg](https://github.com/dromara/electron-egg)。
-
 ```
 你的输入:  排查 mysql://root:Pass123@db:3306，联系人 13800138000
 发给模型:  排查 mysql://root:{{CONNSTR_zkpmqx}}@db:3306，联系人 {{PHONE_bcdfgh}}
@@ -33,7 +31,7 @@
 
 ## 浏览器扩展（网页版 AI）
 
-ChatGPT / Claude / DeepSeek 等网页版 AI 通过随附的 Chrome / Edge 扩展接入（与原项目扩展协议兼容）：
+ChatGPT / Claude / DeepSeek 等网页版 AI 通过随附的 Chrome / Edge 扩展接入：
 
 1. 在应用「浏览器扩展」页开启桥接（默认监听 `127.0.0.1:5801`），复制访问令牌
 2. 点击「打开扩展目录」，在 `chrome://extensions` 开启开发者模式 →「加载已解压的扩展程序」选择该目录（也可从 Release 下载 `DataMaskit-extension-*.zip` 解压后加载）
@@ -67,4 +65,4 @@ tests/              单元与端到端测试
 
 ## 许可证
 
-[AGPL-3.0](LICENSE)。脱敏规则移植自 AGPL-3.0 的 maskit 项目；electron-egg 框架代码遵循其 [Apache-2.0](LICENSE-electron-egg) 许可证。
+[AGPL-3.0](LICENSE)。部分代码源自 [maskit](https://github.com/xiaYuTian11/maskit)（AGPL-3.0）与 [electron-egg](https://github.com/dromara/electron-egg)（[Apache-2.0](LICENSE-electron-egg)），按其许可证要求保留来源声明。

@@ -1,4 +1,4 @@
-/* Data Maskit Browser Bridge — Service Worker
+/* Data Maskit Extension — Service Worker
  *
  * 职责：**唯一**与本地引擎（panel，默认 http://127.0.0.1:5801）通信的一方。
  * token 只存在本文件的存储里，绝不进页面上下文、绝不进 postMessage。

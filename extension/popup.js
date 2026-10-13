@@ -1,4 +1,4 @@
-/* Data Maskit Browser Bridge — 弹出面板逻辑
+/* Data Maskit Extension — 弹出面板逻辑
  *
  * 目标：回答两个问题 —— ①扩展/引擎现在是什么状态；②**到底生效没有**。
  * (B) 类直通是**静默不脱敏**，只看 badge 与累计计数完全无感，所以这里必须有

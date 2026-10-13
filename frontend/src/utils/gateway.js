@@ -1,9 +1,9 @@
-import { ipc, isEE } from '@/utils/ipcRenderer'
+import { ipc, isElectron } from '@/utils/ipcRenderer'
 import { ipcApiRoute, pushEvents } from '@/api'
 
 /** 调用网关频道；非 Electron 环境直接抛错（由调用方 try/catch） */
 export async function call(channel, params) {
-  if (!isEE) throw new Error('未在 Electron 环境中运行')
+  if (!isElectron) throw new Error('未在 Electron 环境中运行')
   return await ipc.invoke(channel, params)
 }
 
@@ -21,7 +21,7 @@ export const gw = {
 
 /** 订阅推送事件，返回取消函数 */
 export function onGatewayEvent(handler) {
-  if (!isEE) return () => {}
+  if (!isElectron) return () => {}
   const listener = (_e, ev) => handler(ev)
   ipc.on(pushEvents.gatewayEvent, listener)
   return () => ipc.removeListener(pushEvents.gatewayEvent, listener)

@@ -1,13 +1,13 @@
 /**
  * Office 文档（docx / xlsx / pptx，兼容 wps / et / dps）内部文本脱敏。
  *
- * 对应 Python 版 panel.mask_ooxml_bytes：解 zip → 对 XML 文本节点逐个脱敏 → 重新封包。
+ * 解 zip → 对 XML 文本节点逐个脱敏 → 重新封包。
  * 不引入 XML DOM 库，文本节点用正则定位，只改动命中的节点，其余字节原样保留。
  *
  * 不变量：
  * - 零命中 → 返回原始字节（不重压缩，上传方按声明大小校验，体积漂移会被拒收）；
  * - 命中过 → 返回的一定是打过码的字节，体积对不齐也不回退明文（回退会让 hits 归零，扩展侧误判成「无敏感信息」）；
- * - 不是 zip / 不是 Office 包 / 解压体积超限 → 原样返回且 hits=0（与 Python 版一致）。
+ * - 不是 zip / 不是 Office 包 / 解压体积超限 → 原样返回且 hits=0。
  */
 import { unzipSync, zipSync, type ZipOptions } from 'fflate';
 import type { Masker } from '../core';
@@ -178,7 +178,7 @@ function maskGenericXml(xml: string, masker: Masker): { xml: string; hits: numbe
   return { xml: out, hits };
 }
 
-/** 对应 Python _pad_zip_to_size：借 EOCD 注释字段把 zip 无损补到目标体积（只能补大） */
+/** 借 EOCD 注释字段把 zip 无损补到目标体积（只能补大） */
 export function padZipToSize(zip: Uint8Array, target: number): Uint8Array {
   if (zip.length >= target) return zip;
   const diff = target - zip.length;

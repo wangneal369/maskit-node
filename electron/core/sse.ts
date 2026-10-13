@@ -1,5 +1,5 @@
 /**
- * SSE 流式还原（对应 Python 版 _sse_text_slots / _restore_sse_event / _flush_pending）。
+ * SSE 流式还原。
  *
  * 按事件（空行分隔）解析，只改「增量文本槽位」，其余字段逐字节透传；
  * 跨 chunk 的半截占位符由 Restorer 按通道扣留，通道结束时补发一个合成增量事件吐出残留。

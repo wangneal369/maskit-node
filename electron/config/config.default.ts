@@ -35,14 +35,14 @@ export default (): Partial<Config> => {
       timestamp: true,
       depthLimit: 5,
       timezone: 'Asia/Shanghai',
-      name: 'ee',
-      appLogName: 'ee.log',
-      coreLogName: 'ee-core.log',
-      errorLogName: 'ee-error.log'
+      name: 'maskit',
+      appLogName: 'maskit.log',
+      coreLogName: 'maskit-core.log',
+      errorLogName: 'maskit-error.log'
     },
     remote: {
       enable: false,
-      url: 'http://electron-egg.kaka996.com/'
+      url: ''
     },
     socketServer: {
       enable: false,

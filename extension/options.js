@@ -1,4 +1,4 @@
-/* Data Maskit Browser Bridge — 设置页逻辑
+/* Data Maskit Extension — 设置页逻辑
  *
  * 安全边界（违反即返工）：
  *  - token 只写入 `chrome.storage.local`，**不注入页面、不进 postMessage**；
@@ -17,7 +17,7 @@ const reasonFor = (domain) => self.MASKIT_SHARED.unsupportedReason(domain);
 
 const I18N = {
   zh: {
-    title: 'Data Maskit Browser Bridge',
+    title: 'Data Maskit Extension',
     subtitle: '把网页版 AI（ChatGPT / Claude / DeepSeek 等）的请求送进本地 Maskit 引擎打码，回包流式还原。100% 本地运算，零外传。',
     secEngine: '引擎连接',
     engineHint: '本机引擎地址。默认端口 5801，改了端口就在这里同步。',
@@ -70,7 +70,7 @@ const I18N = {
     quota: '会话存储占用 {used}（预算 {budget}）· 签发表 {sids} 条 · Chrome ≤111 约 1MB，112+ 约 10MB',
   },
   en: {
-    title: 'Data Maskit Browser Bridge',
+    title: 'Data Maskit Extension',
     subtitle: 'Routes web-AI (ChatGPT / Claude / DeepSeek, …) requests through the local Maskit engine for masking, and restores responses as they stream. 100% local, zero egress.',
     secEngine: 'Engine',
     engineHint: 'Local engine address. Default port 5801; keep this in sync if you changed it.',

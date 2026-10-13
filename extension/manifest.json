@@ -1,13 +1,19 @@
 {
   "manifest_version": 3,
-  "name": "Data Maskit Browser Bridge",
+  "name": "Data Maskit Extension",
   "version": "1.0.0",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "description": "把网页版 AI（ChatGPT / Claude / DeepSeek）发出的请求送进本地 Maskit 引擎打码，回包流式无感还原。100% 本地运算，零外传。",
   "homepage_url": "https://github.com/wangneal369/maskit-node",
   "minimum_chrome_version": "111",
   "browser_specific_settings": {
     "gecko": {
-      "id": "maskit-bridge@maskit.local",
+      "id": "data-maskit@wangneal369.github.io",
       "strict_min_version": "128.0"
     }
   },
@@ -33,7 +39,13 @@
   "options_page": "options.html",
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Data Maskit Browser Bridge"
+    "default_title": "Data Maskit Extension",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "content_scripts": [
     {

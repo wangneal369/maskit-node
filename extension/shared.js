@@ -1,4 +1,4 @@
-/* Data Maskit Browser Bridge — 扩展内共享常量与纯函数（**唯一来源**）
+/* Data Maskit Extension — 扩展内共享常量与纯函数（**唯一来源**）
  *
  * 为什么单独成文件：这三样东西原先在 background.js / options.js / popup.js 里各抄了一份：
  *   - `STATIC_SITES`（3 份）、`UNSUPPORTED_REASON`（2 份）、
