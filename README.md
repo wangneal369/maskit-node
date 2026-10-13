@@ -136,6 +136,19 @@ const client = new Anthropic({ baseURL: 'http://127.0.0.1:18703', apiKey: '你�
 
 保存后，工具的 Base URL 填 `http://127.0.0.1:18704/v1`（Anthropic 协议的填 `http://127.0.0.1:18704`）。
 
+路径按「完全相同或以它结尾」匹配；以 `*` 结尾表示前缀匹配，用于路径里带模型名的接口（如 Gemini）。
+
+### Ollama 与 Gemini
+
+同样在「规则 → 上游」各加一条：
+
+| 服务 | 目标地址 | 路径 | 工具里填的地址 |
+|---|---|---|---|
+| Ollama（本机） | `http://127.0.0.1:11434` | `/api/chat, /api/generate, /v1/chat/completions` | `http://127.0.0.1:<本地端口>` |
+| Gemini | `https://generativelanguage.googleapis.com` | `/v1beta/models/*` | `http://127.0.0.1:<本地端口>`（作为 API endpoint / base URL） |
+
+Ollama 的 NDJSON 流式回复、Gemini 的 `generateContent` / `streamGenerateContent`（SSE 或 JSON 数组）都会逐段还原；图片等 base64 内容不会被扫描改写。本机上游始终直连，不走出网代理。
+
 ### 网页版 AI（ChatGPT / Claude / DeepSeek）
 
 网页版没法改 Base URL，需要装随附的浏览器扩展（Chrome / Edge）：
@@ -219,7 +232,7 @@ Skill 包也随 Release 发布（`maskit-placeholders-<版本>.zip`）。即使�
 | 语义识别 | 规则 → 语义识别 | 开关、识别时间预算、下载模型 |
 | 自检 / 连通性 | 系统 | 检查端口、存储、NER、出网代理；逐个探测上游是否可达 |
 | 诊断包 | 系统 | 导出版本、状态、脱敏后的配置与最近日志，用于反馈问题（不含令牌与敏感词原文） |
-| 更新 | 系统 | 手动检查新版本；可开启启动时自动检查（会访问 api.github.com，默认关闭） |
+| 更新 | 系统 | 手动检查新版本；可开启启动时自动检查（会访问 GitHub，默认关闭）。Windows 与 Linux（deb）可在应用内下载并重启安装，deb 安装时需输入管理员密码；macOS 安装包未签名，只能提示后前往下载页更新 |
 | 开机自启 | 系统 | 仅桌面版 |
 | 配置备份 | 系统 | 每次保存配置自动备份最近 10 份，可一键恢复；支持导出 / 导入配置文件 |
 

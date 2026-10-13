@@ -2,7 +2,10 @@ export { Masker, DEFAULT_MASK_CONFIG, type MaskConfig, type MaskHit, type Custom
 export { MappingStore } from './store';
 export { Restorer } from './restorer';
 export { SseRestorer } from './sse';
+export { NdjsonRestorer } from './ndjson';
 export { maskJson, type MaskJsonOptions } from './tree';
+export { maskRequestText, deepEqual, type RewriteResult } from './rewrite';
+export { hasDuplicateKeys } from './json-dupes';
 export { maskBody, type BodyMaskResult } from './body';
 export { DEFAULT_BUILTIN_RULES, DEFAULT_SECRET_PREFIXES, type RuleLabel } from './rules';
 export { CREDENTIAL_LABELS, isCredentialLabel } from './credential-labels';

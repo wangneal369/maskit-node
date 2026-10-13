@@ -46,7 +46,14 @@
     "createStartMenuShortcut": true,
     "shortcutName": "Data Maskit"
   },
-  "publish": null,
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "wangneal369",
+      "repo": "maskit-node",
+      "releaseType": "release"
+    }
+  ],
   "win": {
     "icon": "build/icons/icon.ico",
     "artifactName": "${productName}-${os}-${version}-${arch}.${ext}",

@@ -34,7 +34,14 @@
       "to": "agent-bundle"
     }
   ],
-  "publish": null,
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "wangneal369",
+      "repo": "maskit-node",
+      "releaseType": "release"
+    }
+  ],
   "linux": {
     "icon": "build/icons/icon.png",
     "artifactName": "${productName}-${os}-${version}-${arch}.${ext}",

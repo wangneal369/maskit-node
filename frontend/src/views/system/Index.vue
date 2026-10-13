@@ -52,9 +52,36 @@
       <div class="card-title">更新</div>
       <div class="row wrap" style="margin-bottom:10px">
         <span>当前版本：<span class="mono">{{ version || (upd && upd.current) || '未知' }}</span></span>
-        <button class="btn sm" :disabled="busy.update" @click="doCheckUpdate">{{ busy.update ? '检查中…' : '检查更新' }}</button>
+        <button class="btn sm" :disabled="busy.update || ups.status === 'checking' || ups.status === 'downloading'" @click="doCheckUpdate">{{ busy.update || ups.status === 'checking' ? '检查中…' : '检查更新' }}</button>
       </div>
-      <div v-if="upd">
+      <div v-if="ups.supported">
+        <div v-if="ups.platformNote" class="sub" style="margin-bottom:8px">{{ ups.platformNote }}</div>
+        <div v-if="ups.status === 'checking'" class="sub">正在检查更新…</div>
+        <div v-else-if="ups.status === 'not-available'" class="sub">已是最新版本</div>
+        <div v-else-if="ups.status === 'error'" class="err-line">
+          更新失败：{{ ups.error }}
+          <button v-if="ups.version" class="btn sm" style="margin-left:8px" @click="doUpdaterDownload">重试下载</button>
+        </div>
+        <div v-else-if="ups.status === 'available'" class="update-box">
+          <div class="row wrap">
+            <span>发现新版本 <b class="mono">{{ tag(ups.version) }}</b></span>
+            <button class="btn sm primary" @click="doUpdaterDownload">下载更新</button>
+          </div>
+          <pre v-if="ups.releaseNotes" class="notes">{{ ups.releaseNotes }}</pre>
+        </div>
+        <div v-else-if="ups.status === 'downloading'" class="update-box">
+          <div>正在下载 <b class="mono">{{ tag(ups.version) }}</b>：{{ pct }}%
+            <span v-if="ups.progress && ups.progress.total" class="sub">（{{ fmtSize(ups.progress.transferred) }} / {{ fmtSize(ups.progress.total) }}，{{ fmtSize(ups.progress.bytesPerSecond) }}/s）</span>
+          </div>
+          <div class="pbar"><div class="pbar-in" :style="{ width: pct + '%' }"></div></div>
+        </div>
+        <div v-else-if="ups.status === 'downloaded'" class="update-box row wrap">
+          <span><b class="mono">{{ tag(ups.version) }}</b> 已下载完成</span>
+          <button class="btn sm primary" @click="doUpdaterInstall">重启并安装</button>
+        </div>
+      </div>
+      <div v-else-if="upd">
+        <div v-if="ups.platformNote" class="sub" style="margin-bottom:8px">{{ ups.platformNote }}</div>
         <div v-if="upd.error" class="err-line">检查失败：{{ upd.error }}</div>
         <div v-else-if="upd.hasUpdate" class="update-box row wrap">
           <span>发现新版本 <b class="mono">{{ tag(upd.latest) }}</b></span>
@@ -105,8 +132,8 @@
   </div>
 </template>
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
-import { gw } from '@/utils/gateway';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { gw, onUpdaterState } from '@/utils/gateway';
 import { toast } from '@/utils/toast';
 import { isElectron } from '@/utils/ipcRenderer';
 
@@ -117,6 +144,9 @@ const busy = reactive({
 const checkItems = ref(null);
 const upstreams = ref(null);
 const upd = ref(null);
+/** 应用内更新状态（Electron 打包版 supported=true；其余退回 GitHub API 检查） */
+const ups = ref({ supported: false, status: 'idle' });
+const pct = computed(() => Math.max(0, Math.min(100, Math.round(ups.value.progress?.percent ?? 0))));
 const backups = ref([]);
 const appCfg = ref({ autostart: false, checkUpdates: false });
 const autostart = ref(null);
@@ -185,11 +215,28 @@ async function doDiagnostics() {
 async function doCheckUpdate() {
   busy.update = true;
   try {
+    if (ups.value.supported) {
+      ups.value = await gw.updaterCheck();
+      return;
+    }
     upd.value = await gw.checkUpdate();
   } catch (e) {
     upd.value = { current: upd.value?.current, hasUpdate: false, error: errMsg(e) };
   } finally { busy.update = false; }
 }
+
+async function doUpdaterDownload() {
+  try { ups.value = await gw.updaterDownload(); } catch (e) { toast('下载失败：' + errMsg(e), false); }
+}
+
+async function doUpdaterInstall() {
+  try {
+    const r = await gw.updaterInstall();
+    if (r && r.ok === false) toast(r.error || '安装失败', false);
+  } catch (e) { toast('安装失败：' + errMsg(e), false); }
+}
+
+let offUpdater = () => {};
 
 async function loadAppSettings() {
   try {
@@ -271,11 +318,14 @@ async function doImportConfig() {
 const version = ref('');
 
 onMounted(() => {
+  offUpdater = onUpdaterState((st) => { ups.value = st; });
+  gw.updaterState().then((st) => { if (st) ups.value = st; }).catch(() => {});
   loadAppSettings();
   loadAutostart();
   loadBackups();
   gw.status().then((s) => { version.value = s?.version || ''; }).catch(() => {});
 });
+onBeforeUnmount(() => offUpdater());
 </script>
 <style lang="less" scoped>
 .check-item {
@@ -296,6 +346,12 @@ onMounted(() => {
   background: var(--ok-soft); color: var(--ok);
   padding: 8px 12px; border-radius: 8px; font-size: 13px;
 }
+.notes {
+  margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow-y: auto;
+  font-family: inherit; font-size: 12px; line-height: 1.6; color: var(--text);
+}
+.pbar { height: 6px; border-radius: 3px; background: rgba(0,0,0,.08); margin-top: 8px; overflow: hidden; }
+.pbar-in { height: 100%; background: var(--primary); transition: width .2s; }
 .toggle-row { align-items: flex-start; }
 .switch.disabled { opacity: .5; cursor: not-allowed; }
 </style>

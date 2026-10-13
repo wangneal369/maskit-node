@@ -10,7 +10,7 @@ import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import zlib from 'node:zlib';
 import { Agent, fetch, ProxyAgent, type Dispatcher, type Response } from 'undici';
-import { maskJson, Masker, Restorer, SseRestorer } from '../core';
+import { Masker, maskRequestText, NdjsonRestorer, Restorer, SseRestorer } from '../core';
 import type { AuditFinding } from '../core/audit';
 import { CommandScanner, DEFAULT_COMMAND_BLOCK } from '../core/command-block';
 import { modelFromJson, type Usage } from '../core/usage';
@@ -63,6 +63,10 @@ export interface GatewayEvent {
   commands?: CommandRecord[];
   /** 本地 NER 概况：失败/超时降级必须在这里可见（规则脱敏仍照常生效） */
   ner?: { entities: number; truncated: boolean; error?: string };
+  /** 请求体回写方式：splice = 原文就地替换（保住前缀缓存），reserialize = 整棵重序列化 */
+  rewrite?: 'splice' | 'reserialize';
+  /** 上游连接失败后的重试次数 */
+  retries?: number;
 }
 
 const MAX_BODY = 32 * 1024 * 1024;
@@ -89,6 +93,26 @@ function readBody(req: http.IncomingMessage): Promise<Buffer> {
     req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
+}
+
+/** 上游连接失败最多尝试次数（含首次） */
+const MAX_UPSTREAM_ATTEMPTS = 2;
+const RETRY_DELAY_MS = 200;
+/**
+ * 只认「连接都没建立起来」的错误：这时请求一个字节都没发出，重试不会让上游重复处理（重复计费）。
+ * ECONNRESET / socket 中途断开不在其列——请求可能已被上游收下。
+ */
+const CONNECT_FAILURE_CODES = new Set([
+  'ECONNREFUSED', 'ETIMEDOUT', 'ENETUNREACH', 'EHOSTUNREACH', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT',
+]);
+
+export function isConnectFailure(e: unknown): boolean {
+  for (let cur: unknown = e, depth = 0; cur && depth < 4; depth++) {
+    const code = (cur as { code?: unknown }).code;
+    if (typeof code === 'string' && CONNECT_FAILURE_CODES.has(code)) return true;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 /** 本机上游（如本地 Ollama）永远直连，不经出网代理 */
@@ -142,8 +166,12 @@ function decodeRequestBody(body: Buffer, encodingHeader: string): Buffer {
   return out;
 }
 
-function matchPath(pathname: string, paths: string[]): boolean {
-  return paths.some((p) => pathname === p || pathname.endsWith(p));
+/**
+ * 路径匹配：精确或后缀匹配；以 `*` 结尾的条目按前缀匹配。
+ * Gemini 的路径带模型名（/v1beta/models/gemini-2.5-pro:generateContent），后缀匹配不到，配 `/v1beta/models/*`。
+ */
+export function matchPath(pathname: string, paths: string[]): boolean {
+  return paths.some((p) => (p.endsWith('*') ? pathname.startsWith(p.slice(0, -1)) : pathname === p || pathname.endsWith(p)));
 }
 
 function sendJsonError(res: http.ServerResponse, status: number, message: string): void {
@@ -256,9 +284,13 @@ export class Gateway extends EventEmitter {
         inspector = new ResponseInspector(this.policy, requestText, modelFromJson(parsed));
         // NER 在 maskJson 之前跑：它看的是未脱敏原文。失败/超时只降级（规则照常生效），并记入事件
         const entities = await this.runNer(parsed, ev);
-        const result = maskJson(this.masker, parsed, entities ? { entities } : undefined);
-        // 没命中就一个字节都不改，保住上游前缀缓存
-        if (result.changed) body = Buffer.from(JSON.stringify(result.body), 'utf8');
+        // 没命中就一个字节都不改；命中时优先在原文上就地替换，保住客户端排版与上游前缀缓存。
+        // 有重复键时一律从脱敏树重序列化（否则被覆盖的那个值会以明文上行）
+        const result = maskRequestText(this.masker, requestText, entities ? { entities } : undefined);
+        if (result.method !== 'unchanged') {
+          body = Buffer.from(result.text, 'utf8');
+          ev.rewrite = result.method;
+        }
         ev.hits = result.hits.map(({ label, token }) => ({ label, token }));
         ev.signedBlocksSkipped = result.signedBlocksSkipped;
       } catch (e) {
@@ -287,14 +319,23 @@ export class Gateway extends EventEmitter {
 
     let upstreamRes: Response;
     try {
-      upstreamRes = await fetch(targetUrl, {
-        method: req.method,
-        headers,
-        body: ['GET', 'HEAD'].includes(req.method ?? 'GET') ? undefined : body,
-        signal: abort.signal,
-        redirect: 'manual',
-        dispatcher: isLoopback(targetUrl) ? this.direct : this.dispatcher,
-      });
+      for (let attempt = 1; ; attempt++) {
+        try {
+          upstreamRes = await fetch(targetUrl, {
+            method: req.method,
+            headers,
+            body: ['GET', 'HEAD'].includes(req.method ?? 'GET') ? undefined : body,
+            signal: abort.signal,
+            redirect: 'manual',
+            dispatcher: isLoopback(targetUrl) ? this.direct : this.dispatcher,
+          });
+          break;
+        } catch (e) {
+          if (attempt >= MAX_UPSTREAM_ATTEMPTS || abort.signal.aborted || !isConnectFailure(e)) throw e;
+          ev.retries = attempt;
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        }
+      }
     } catch (e) {
       ev.error = `upstream_failed: ${(e as Error).message}`;
       ev.status = 502;
@@ -334,6 +375,25 @@ export class Gateway extends EventEmitter {
         } else {
           res.end(sse.push(decoder.decode()) + sse.end());
           if (sse.blocked) ev.error = 'command_blocked';
+        }
+      } else if (/ndjson|jsonl|stream\+json/i.test(ct)) {
+        // Ollama 等 NDJSON 流：一行一个 JSON，按行还原，与 SSE 分支同样的阻断处理
+        ev.stream = true;
+        res.writeHead(upstreamRes.status, resHeaders);
+        res.flushHeaders();
+        const nd = new NdjsonRestorer(restorer, inspector?.sseHooks());
+        const decoder = new TextDecoder();
+        for await (const c of upstreamRes.body) {
+          const out = nd.push(decoder.decode(c, { stream: true }));
+          if (out) res.write(out);
+          if (nd.blocked) break;
+        }
+        if (nd.blocked) {
+          ev.error = 'command_blocked';
+          res.end();
+        } else {
+          res.end(nd.push(decoder.decode()) + nd.end());
+          if (nd.blocked) ev.error = 'command_blocked';
         }
       } else {
         const raw = Buffer.from(await upstreamRes.arrayBuffer()).toString('utf8');

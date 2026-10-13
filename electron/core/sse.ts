@@ -48,11 +48,11 @@ interface Template {
 
 const EVENT_SEP_RX = /\r?\n\r?\n/;
 
-function getAt(obj: unknown, path: Path): unknown {
+export function getAt(obj: unknown, path: Path): unknown {
   return path.reduce<unknown>((o, k) => (o as Record<string | number, unknown>)?.[k], obj);
 }
 
-function setAt(obj: unknown, path: Path, value: unknown): void {
+export function setAt(obj: unknown, path: Path, value: unknown): void {
   const parent = getAt(obj, path.slice(0, -1)) as Record<string | number, unknown>;
   parent[path[path.length - 1]] = value;
 }
@@ -100,6 +100,21 @@ export function sseTextSlots(data: unknown): Slot[] {
     if (isStr(data.delta.text)) slots.push({ channel: `a${blk}.text`, path: ['delta', 'text'], escape: false });
     if (isStr(data.delta.partial_json)) slots.push({ channel: `a${blk}.pj`, path: ['delta', 'partial_json'], escape: true });
   }
+  // Gemini：每个 chunk 都是新的 parts 数组，占位符可能跨事件，所以通道只按候选区分（不带 part 下标），
+  // 同事件多个文本 part 共用通道按序拼接；带 thoughtSignature 的 part 不建槽位（签名覆盖原文，还原会让下轮校验失败）
+  const cands = Array.isArray(data.candidates) ? data.candidates : [];
+  cands.forEach((c, pos) => {
+    if (!isRec(c) || !isRec(c.content) || !Array.isArray(c.content.parts)) return;
+    const idx = typeof c.index === 'number' ? c.index : pos;
+    c.content.parts.forEach((p, pj) => {
+      if (!isRec(p) || !isStr(p.text) || p.thoughtSignature) return;
+      slots.push({
+        channel: p.thought === true ? `g${idx}.thought` : `g${idx}.text`,
+        path: ['candidates', pos, 'content', 'parts', pj, 'text'],
+        escape: false,
+      });
+    });
+  });
   // OpenAI Responses
   if (isStr(data.delta)) {
     if (type === 'response.output_text.delta') slots.push({ channel: responsesChannel(data, 'text'), path: ['delta'], escape: false });
@@ -123,6 +138,10 @@ function terminalPrefixes(data: unknown): string[] | null {
   choices.forEach((c, pos) => {
     if (isRec(c) && c.finish_reason) out.push(`c${typeof c.index === 'number' ? c.index : pos}.`);
   });
+  const cands = Array.isArray(data.candidates) ? data.candidates : [];
+  cands.forEach((c, pos) => {
+    if (isRec(c) && c.finishReason) out.push(`g${typeof c.index === 'number' ? c.index : pos}.`);
+  });
   return out;
 }
 
@@ -135,6 +154,20 @@ function syntheticDelta(tpl: Template, text: string): unknown {
     for (const c of data.choices) if (isRec(c) && 'finish_reason' in c) c.finish_reason = null;
   }
   delete data.usage;
+  // Gemini：只保留承载残留文本的那个 part，去掉终止标记与用量，其余 part（含 functionCall）不能重复下发
+  if (tpl.path[0] === 'candidates' && Array.isArray(data.candidates)) {
+    const ci = tpl.path[1] as number;
+    const pj = tpl.path[4] as number;
+    const cand = data.candidates[ci] as Rec;
+    const content = cand.content as Rec;
+    const part = (content.parts as unknown[])[pj];
+    const next: Rec = { ...cand, content: { ...content, parts: [part] } };
+    delete next.finishReason;
+    delete next.finishMessage;
+    if (ci > 0 && !('index' in next)) next.index = ci;
+    data.candidates = [next];
+    delete data.usageMetadata;
+  }
   return data;
 }
 
@@ -222,6 +255,7 @@ export class SseRestorer {
           setAt(data, s.path, restored);
         }
       }
+      this.restoreGeminiCalls(data);
     } else {
       // 非增量事件（如 response.completed 携带完整结果）：整棵还原。
       // 闸门模式下这类整包事件里的完整工具参数也必须过闸，否则危险命令会从这里漏出去
@@ -229,6 +263,29 @@ export class SseRestorer {
       if (gate) data = mapToolArgs(data, (args) => this.applyGate('tree', args));
     }
     return prefix + this.render(head, data);
+  }
+
+  /**
+   * Gemini 的 functionCall.args 是完整对象，可能与文本 part 同事件出现：槽位逻辑只管文本，
+   * 这里就地还原并过闸（模式与整包事件一致；仅记录模式只上报文本供终态扫描）。
+   */
+  private restoreGeminiCalls(data: unknown): void {
+    if (!isRec(data) || !Array.isArray(data.candidates)) return;
+    data.candidates.forEach((c, pos) => {
+      if (!isRec(c) || !isRec(c.content) || !Array.isArray(c.content.parts)) return;
+      const idx = typeof c.index === 'number' ? c.index : pos;
+      const parts = c.content.parts as unknown[];
+      parts.forEach((p, pj) => {
+        if (!isRec(p) || !isRec(p.functionCall)) return;
+        const ch = `g${idx}.call${pj}`;
+        const restored = this.restorer.restoreTree(p.functionCall);
+        p.functionCall = mapToolArgs(restored, (args) => {
+          if (this.hooks.toolGate) return this.applyGate(ch, args);
+          this.hooks.onText?.(ch, args, true);
+          return args;
+        });
+      });
+    });
   }
 
   /** 交给闸门；阻断时置位并返回空串（调用方随后下发错误事件并停止） */

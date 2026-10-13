@@ -331,3 +331,38 @@ describe('Gateway 端到端', () => {
     });
   });
 });
+
+/** 原样发送请求体字节（不压缩），用于验证回写对排版的影响 */
+function sendText(port: number, path: string, text: string) {
+  return fetch(`http://127.0.0.1:${port}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: text });
+}
+
+describe('请求回写与上游重试', () => {
+  it('命中时就地替换：上游收到的字节除敏感值外与原文一致', async () => {
+    const port = await startGateway();
+    const raw = '{\n  "model": "m",\n  "messages": [ { "role": "user", "content": "电话 ' + PHONE + '" } ],\n  "temperature": 1e-05\n}';
+    await sendText(port, TARGET_PATH, raw);
+    const sent = received[0].body;
+    const at = raw.indexOf(PHONE);
+    expect(sent.slice(0, at)).toBe(raw.slice(0, at));
+    expect(sent).toContain('1e-05');
+    expect(sent).not.toContain(PHONE);
+    expect(events[0].rewrite).toBe('splice');
+  });
+
+  it('重复键：被覆盖的敏感值也不会以明文上行', async () => {
+    const port = await startGateway();
+    await sendText(port, TARGET_PATH, `{"model":"m","messages":[{"role":"user","content":"${PHONE}","content":"safe"}]}`);
+    expect(received[0].body).not.toContain(PHONE);
+    expect(events[0].rewrite).toBe('reserialize');
+  });
+
+  it('连接被拒绝：重试一次后返回 502，并记录重试次数', async () => {
+    const port = await freePort();
+    const deadPort = await freePort();
+    await gateway.start([{ name: 'dead', port, target: `http://127.0.0.1:${deadPort}`, paths: [TARGET_PATH] }]);
+    const r = await post(port, TARGET_PATH, chatBody('hi'));
+    expect(r.status).toBe(502);
+    expect(events[0].retries).toBe(1);
+  });
+});

@@ -156,6 +156,11 @@ export const gw = {
   selfCheck: () => call(ipcApiRoute.gatewaySelfCheck),
   testUpstreams: () => call(ipcApiRoute.gatewayTestUpstreams),
   checkUpdate: () => call(ipcApiRoute.gatewayCheckUpdate),
+  /** 应用内更新（仅 Electron；浏览器/Docker 返回 supported=false） */
+  updaterState: () => (isElectron ? call(ipcApiRoute.updaterState) : Promise.resolve({ supported: false, status: 'idle' })),
+  updaterCheck: () => call(ipcApiRoute.updaterCheck),
+  updaterDownload: () => call(ipcApiRoute.updaterDownload),
+  updaterInstall: () => call(ipcApiRoute.updaterInstall),
   listConfigBackups: () => call(ipcApiRoute.gatewayListConfigBackups),
   restoreConfigBackup: (params) => call(ipcApiRoute.gatewayRestoreConfigBackup, params),
   exportConfig: () => call(ipcApiRoute.gatewayExportConfig),
@@ -226,6 +231,14 @@ export function onGatewayEvent(handler) {
     handlers.delete(handler)
     if (!hasSubscribers()) closeEvents()
   }
+}
+
+/** 订阅应用内更新状态推送（仅 Electron），返回取消函数 */
+export function onUpdaterState(handler) {
+  if (!isElectron) return () => {}
+  const listener = (_e, st) => handler(st)
+  ipc.on(pushEvents.updaterState, listener)
+  return () => ipc.removeListener(pushEvents.updaterState, listener)
 }
 
 /** 订阅新版本推送（payload 为 checkUpdate 结果），返回取消函数 */

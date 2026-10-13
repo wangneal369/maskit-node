@@ -8,6 +8,8 @@ import type { Masker, MaskHit } from './masker';
 
 const SKIP_SCALAR_KEYS = new Set([
   'model', 'object', 'finish_reason', 'stop_reason', 'citations', 'detail', 'encoding_format', 'media_type',
+  // Ollama 消息里的图片 base64 数组 / Gemini 媒体类型：改写只会破图，保护不了任何东西
+  'images', 'mimeType',
 ]);
 const SKIP_SUBTREE_KEYS = new Set(['cache_control']);
 const ROLE_TYPE_PARENTS = new Set([
@@ -21,6 +23,8 @@ const PROTOCOL_ID_PARENTS = new Set([
 const PROTOCOL_PARENTS = new Set([
   'function', 'functions', 'function_call', 'functionCall', 'tool_use', 'tools', 'tool',
   'image_url', 'inline_data', 'thumbnail', 'input_image', 'source', 'file',
+  // Gemini 驼峰写法的媒体容器（data 为图片 / 文件 base64）
+  'inlineData', 'fileData',
 ]);
 const SKIP_KEYS = new Set(['id', 'tool_call_id', 'tool_use_id', 'name', 'url', 'data', 'b64_json']);
 /** 工具调用关联 ID：不分业务区一律豁免，脱敏必然断链 */

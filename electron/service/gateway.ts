@@ -3,6 +3,7 @@ import { logger } from 'ee-core/log';
 import { getDataDir } from 'ee-core/ps';
 import { getMainWindow } from 'ee-core/electron';
 import { GatewayCore, type AppConfig } from '../app/gateway-core';
+import { updaterService } from './updater';
 
 /** 窗口未创建或已销毁时静默丢弃（getMainWindow 在窗口创建前会抛错） */
 function pushToRenderer(channel: string, payload: unknown): void {
@@ -46,6 +47,8 @@ class GatewayService {
   async init() {
     await this.core.init();
     this.syncAutostart();
+    // 应用内更新：仅用户开启「启动时检查更新」且平台支持时联网检查，不自动下载
+    updaterService.startupCheck(this.core.getConfig().app.checkUpdates);
   }
   start() { return this.core.start(); }
   stop() { return this.core.stop(); }

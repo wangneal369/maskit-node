@@ -107,28 +107,28 @@ module.exports = {
     win64: {
       cmd: 'electron-builder',
       directory: './',
-      args: ['--config=./cmd/builder.json', '-w=nsis', '--x64'],
+      args: ['--config=./cmd/builder.json', '-w=nsis', '--x64', '--publish=never'],
     },
     win32: {
-      args: ['--config=./cmd/builder.json', '-w=nsis', '--ia32'],
+      args: ['--config=./cmd/builder.json', '-w=nsis', '--ia32', '--publish=never'],
     },
     win_e: {
-      args: ['--config=./cmd/builder.json', '-w=portable', '--x64'],
+      args: ['--config=./cmd/builder.json', '-w=portable', '--x64', '--publish=never'],
     },
     win_7z: {
-      args: ['--config=./cmd/builder.json', '-w=7z', '--x64'],
+      args: ['--config=./cmd/builder.json', '-w=7z', '--x64', '--publish=never'],
     },
     mac: {
-      args: ['--config=./cmd/builder-mac.json', '-m'],
+      args: ['--config=./cmd/builder-mac.json', '-m', '--publish=never'],
     },
     mac_arm64: {
-      args: ['--config=./cmd/builder-mac-arm64.json', '-m', '--arm64'],
+      args: ['--config=./cmd/builder-mac-arm64.json', '-m', '--arm64', '--publish=never'],
     },
     linux: {
-      args: ['--config=./cmd/builder-linux.json', '-l=deb', '--x64'],
+      args: ['--config=./cmd/builder-linux.json', '-l=deb', '--x64', '--publish=never'],
     },
     linux_arm64: {
-      args: ['--config=./cmd/builder-linux.json', '-l=deb', '--arm64'],
+      args: ['--config=./cmd/builder-linux.json', '-l=deb', '--arm64', '--publish=never'],
     },
   },
 

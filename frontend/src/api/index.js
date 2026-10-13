@@ -22,6 +22,10 @@ const ipcApiRoute = {
   gatewaySelfCheck: 'controller/gateway/selfCheck',
   gatewayTestUpstreams: 'controller/gateway/testUpstreams',
   gatewayCheckUpdate: 'controller/gateway/checkUpdate',
+  updaterState: 'controller/gateway/updaterState',
+  updaterCheck: 'controller/gateway/updaterCheck',
+  updaterDownload: 'controller/gateway/updaterDownload',
+  updaterInstall: 'controller/gateway/updaterInstall',
   gatewayListConfigBackups: 'controller/gateway/listConfigBackups',
   gatewayRestoreConfigBackup: 'controller/gateway/restoreConfigBackup',
   gatewayExportConfig: 'controller/gateway/exportConfig',
@@ -36,6 +40,7 @@ const ipcApiRoute = {
 const pushEvents = {
   gatewayEvent: 'maskit/event',
   updateAvailable: 'maskit/update',
+  updaterState: 'maskit/updater',
 }
 
 export {

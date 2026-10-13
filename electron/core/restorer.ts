@@ -83,7 +83,11 @@ export class Restorer {
       const rec = obj as Record<string, unknown>;
       if (typeof rec.type === 'string' && RESTORE_SKIP_BLOCK_TYPES.has(rec.type)) return obj;
       const out: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(rec)) out[k] = k === 'signature' ? v : this.restoreTree(v, depth + 1);
+      // Gemini：带 thoughtSignature 的 part，其 text 与签名绑定，不还原（同 Anthropic 签名思考块）
+      const signed = !!rec.thoughtSignature;
+      for (const [k, v] of Object.entries(rec)) {
+        out[k] = k === 'signature' || (signed && k === 'text') ? v : this.restoreTree(v, depth + 1);
+      }
       return out;
     }
     return obj;

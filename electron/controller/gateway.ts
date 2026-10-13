@@ -4,6 +4,7 @@ import { shell, dialog, app } from 'electron';
 import { zipSync } from 'fflate';
 import { getBaseDir, getExtraResourcesDir, isPackaged } from 'ee-core/ps';
 import { gatewayService } from '../service/gateway';
+import { updaterService } from '../service/updater';
 import type { AppConfig } from '../gateway/config';
 
 /**
@@ -153,6 +154,23 @@ class GatewayController {
 
   async checkUpdate() {
     return gatewayService.checkUpdate();
+  }
+
+  /** 应用内更新状态（supported=false 时前端退回 GitHub API 检查 + 前往下载） */
+  async updaterState() {
+    return updaterService.state();
+  }
+
+  async updaterCheck() {
+    return updaterService.check();
+  }
+
+  async updaterDownload() {
+    return updaterService.download();
+  }
+
+  async updaterInstall() {
+    return updaterService.quitAndInstall();
   }
 
   async listConfigBackups() {

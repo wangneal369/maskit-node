@@ -109,3 +109,21 @@ describe('maskJson', () => {
     expect(() => run(deep)).not.toThrow();
   });
 });
+
+describe('多协议媒体字段豁免', () => {
+  it('Gemini inlineData / Ollama images 的 base64 不被规则改写，正文照常脱敏', () => {
+    const masker = new Masker(new MappingStore());
+    // 一段恰好含 Luhn 合法 16 位数字的「base64」
+    const b64 = 'iVBOR+4111111111111111/AAAA';
+    // 前提：这串数据单独扫描时确实会被卡号规则命中，豁免才有意义
+    expect(masker.mask(b64)).not.toBe(b64);
+    const gemini = { contents: [{ role: 'user', parts: [{ text: '电话 13800138000' }, { inlineData: { mimeType: 'image/png', data: b64 } }] }] };
+    const g = maskJson(masker, gemini).body as typeof gemini;
+    expect((g.contents[0].parts[1] as { inlineData: { data: string } }).inlineData.data).toBe(b64);
+    expect((g.contents[0].parts[0] as { text: string }).text).not.toContain('13800138000');
+    const ollama = { model: 'llama3', messages: [{ role: 'user', content: '电话 13800138000', images: [b64] }] };
+    const o = maskJson(masker, ollama).body as typeof ollama;
+    expect(o.messages[0].images[0]).toBe(b64);
+    expect(o.messages[0].content).not.toContain('13800138000');
+  });
+});

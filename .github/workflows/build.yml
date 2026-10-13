@@ -40,17 +40,25 @@ jobs:
           - os: windows-latest
             script: build-w
             artifact: windows-x64
-            files: out/*.exe
+            files: |
+              out/*.exe
+              out/*.exe.blockmap
+              out/latest.yml
           - os: macos-latest
             script: build-m-arm64
             artifact: macos-arm64
             files: |
               out/*.dmg
+              out/*.dmg.blockmap
               out/*.zip
+              out/*.zip.blockmap
+              out/latest-mac.yml
           - os: ubuntu-latest
             script: build-l
             artifact: linux-x64
-            files: out/*.deb
+            files: |
+              out/*.deb
+              out/latest-linux.yml
     runs-on: ${{ matrix.os }}
     env:
       # 未配置签名证书：关闭 macOS 自动查找签名身份，产物为未签名包

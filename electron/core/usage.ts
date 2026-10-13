@@ -44,10 +44,32 @@ export const DEFAULT_MODEL_PRICES: Record<string, ModelPrice> = {
   'claude-haiku-4-5': { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
   'claude-3-5-haiku': { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 1 },
 
+  // Google Gemini（参考 ≤200K 上下文档价格；超长上下文另有更高单价，此处不区分）
+  'gemini-2.5-pro': { input: 1.25, output: 10, cacheRead: 0.31 },
+  'gemini-2.5-flash': { input: 0.3, output: 2.5, cacheRead: 0.075 },
+  'gemini-2.0-flash': { input: 0.1, output: 0.4, cacheRead: 0.025 },
+
   // DeepSeek（cacheRead = 缓存命中价）
   'deepseek-chat': { input: 0.28, output: 0.42, cacheRead: 0.028 },
   'deepseek-reasoner': { input: 0.28, output: 0.42, cacheRead: 0.028 },
 };
+
+/** Gemini usageMetadata：promptTokenCount 含缓存；输出含思考 token。无该字段返回 undefined */
+function usageFromGemini(meta: unknown): Usage | undefined {
+  if (typeof meta !== 'object' || meta === null) return undefined;
+  const m = meta as Record<string, unknown>;
+  if (!('promptTokenCount' in m) && !('candidatesTokenCount' in m)) return undefined;
+  const cacheRead = Number(m.cachedContentTokenCount) || 0;
+  const input = Math.max(0, (Number(m.promptTokenCount) || 0) - cacheRead);
+  const output = (Number(m.candidatesTokenCount) || 0) + (Number(m.thoughtsTokenCount) || 0);
+  return { input, output, cacheRead, cacheWrite: 0 };
+}
+
+/** Ollama：终止行 / 非流式响应顶层的 prompt_eval_count / eval_count */
+function usageFromOllama(d: Record<string, unknown>): Usage | undefined {
+  if (!('eval_count' in d) && !('prompt_eval_count' in d)) return undefined;
+  return { input: Number(d.prompt_eval_count) || 0, output: Number(d.eval_count) || 0, cacheRead: 0, cacheWrite: 0 };
+}
 
 /**
  * 从非流式 JSON 响应提取用量。
@@ -55,12 +77,26 @@ export const DEFAULT_MODEL_PRICES: Record<string, ModelPrice> = {
  * - OpenAI chat: usage.prompt_tokens / completion_tokens + prompt_tokens_details.cached_tokens
  * - OpenAI Responses: usage.input_tokens / output_tokens + input_tokens_details.cached_tokens
  * - Anthropic: usage.input_tokens / output_tokens + cache_read_input_tokens / cache_creation_input_tokens
+ * - Gemini: usageMetadata.promptTokenCount / candidatesTokenCount / cachedContentTokenCount / thoughtsTokenCount
+ * - Ollama: 顶层 prompt_eval_count / eval_count
  * 拿不到返回 undefined。
  */
 export function usageFromJson(body: unknown): Usage | undefined {
+  // Gemini 的流式 JSON（非 SSE）是对象数组：用量在最后一个带 usageMetadata 的元素里
+  if (Array.isArray(body)) {
+    for (let i = body.length - 1; i >= 0; i--) {
+      const u = usageFromJson(body[i]);
+      if (u) return u;
+    }
+    return undefined;
+  }
   if (typeof body !== 'object' || body === null) return undefined;
 
   const b = body as Record<string, unknown>;
+  const gem = usageFromGemini(b.usageMetadata);
+  if (gem) return gem;
+  const oll = usageFromOllama(b);
+  if (oll) return oll;
   const usage = b.usage as Record<string, unknown> | undefined;
 
   if (!usage || typeof usage !== 'object') return undefined;
@@ -125,6 +161,14 @@ export class UsageCollector {
       this.m = this.m || (typeof resp.model === 'string' ? resp.model : undefined);
     }
     this.m = this.m || (typeof d.model === 'string' ? d.model : undefined);
+    this.m = this.m || (typeof d.modelVersion === 'string' ? d.modelVersion : undefined);
+
+    // Gemini：每个 chunk 的 usageMetadata 是累计值，取最后一次；Ollama：终止行的 eval 计数
+    const gem = usageFromGemini(d.usageMetadata) ?? usageFromOllama(d);
+    if (gem) {
+      this.u = gem;
+      return;
+    }
 
     // OpenAI chat: 末尾 chunk 的 usage（每个 delta 都可能有，但通常只有最后一个）
     if (d.type === 'content_block_delta' || (typeof d.usage === 'object' && d.usage !== null)) {
@@ -191,6 +235,13 @@ export class UsageCollector {
  * 优先级：响应的 model / message.model / response.model > 请求体的 model
  */
 export function modelFromJson(body: unknown): string | undefined {
+  if (Array.isArray(body)) {
+    for (const x of body) {
+      const m = modelFromJson(x);
+      if (m) return m;
+    }
+    return undefined;
+  }
   if (typeof body !== 'object' || body === null) return undefined;
 
   const b = body as Record<string, unknown>;
@@ -208,6 +259,9 @@ export function modelFromJson(body: unknown): string | undefined {
 
   // 最后尝试顶层 model 字段
   if (typeof b.model === 'string') return b.model;
+
+  // Gemini 响应：modelVersion
+  if (typeof b.modelVersion === 'string') return b.modelVersion;
 
   return undefined;
 }

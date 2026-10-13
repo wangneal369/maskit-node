@@ -9,7 +9,12 @@
     <main class="main">
       <div v-if="updateBanner.show" class="update-banner">
         <span>发现新版本 <b class="mono">{{ updateBanner.tag }}</b>，</span>
-        <a href="#" class="update-link" @click.prevent="openUpdate">前往下载</a>
+        <template v-if="ups.supported">
+          <span v-if="ups.status === 'downloading'">正在下载 {{ pct }}%…</span>
+          <a v-else-if="ups.status === 'downloaded'" href="#" class="update-link" @click.prevent="installUpdate">重启并安装</a>
+          <a v-else href="#" class="update-link" @click.prevent="downloadUpdate">下载并安装</a>
+        </template>
+        <a v-else href="#" class="update-link" @click.prevent="openUpdate">前往下载</a>
         <button class="update-close" title="关闭" @click="dismissUpdate">×</button>
       </div>
       <div v-if="needLogin" class="login">
@@ -28,7 +33,7 @@
 </template>
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
-import { auth, gw, setToken, onUpdateAvailable } from '@/utils/gateway';
+import { auth, gw, setToken, onUpdateAvailable, onUpdaterState } from '@/utils/gateway';
 import { toastState } from '@/utils/toast';
 
 const navs = [
@@ -61,6 +66,19 @@ function onUpdatePush(info) {
 function dismissUpdate() {
   dismissedTag = updateBanner.tag;
   updateBanner.show = false;
+}
+
+// 应用内更新（仅 Electron 打包版 supported=true；其余保持「前往下载」）
+const ups = ref({ supported: false, status: 'idle' });
+const pct = computed(() => Math.max(0, Math.min(100, Math.round(ups.value.progress?.percent ?? 0))));
+let offUpdater = () => {};
+
+function downloadUpdate() {
+  gw.updaterDownload().then((st) => { if (st) ups.value = st; }).catch(() => {});
+}
+
+function installUpdate() {
+  gw.updaterInstall().catch(() => {});
 }
 
 function openUpdate() {
@@ -96,9 +114,17 @@ onMounted(() => {
     loadingElement.remove();
   }
   offUpdate = onUpdateAvailable(onUpdatePush);
+  offUpdater = onUpdaterState((st) => {
+    ups.value = st;
+    // 启动检查由 electron-updater 发现新版本时，同样弹出横幅
+    if (st.supported && st.status === 'available' && st.version) {
+      onUpdatePush({ hasUpdate: true, latest: st.version, url: updateBanner.url });
+    }
+  });
+  gw.updaterState().then((st) => { if (st) ups.value = st; }).catch(() => {});
 });
 
-onBeforeUnmount(() => offUpdate());
+onBeforeUnmount(() => { offUpdate(); offUpdater(); });
 </script>
 <style lang="less">
 .shell { display: flex; height: 100%; }
