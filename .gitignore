@@ -1,0 +1,11 @@
+node_modules
+out/
+logs/
+run/
+.idea/
+public/dist/
+data/
+.vscode/launch.json
+public/electron/
+pnpm-lock.yaml
+.tmp-shots/

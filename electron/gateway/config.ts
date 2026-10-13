@@ -1,0 +1,49 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { DEFAULT_MASK_CONFIG, type MaskConfig } from '../core';
+import type { Upstream } from './proxy';
+
+export interface AppConfig {
+  maskEnabled: boolean;
+  /** 出网代理：'' = 自动（环境变量 → 系统代理），'direct' = 直连，其余为代理 URL */
+  egressProxy: string;
+  upstreams: Upstream[];
+  mask: MaskConfig;
+}
+
+export const DEFAULT_UPSTREAMS: Upstream[] = [
+  { name: 'openai', port: 18701, target: 'https://api.openai.com', paths: ['/v1/chat/completions', '/v1/completions', '/v1/responses'] },
+  { name: 'deepseek', port: 18702, target: 'https://api.deepseek.com', paths: ['/v1/chat/completions', '/v1/completions', '/chat/completions'] },
+  { name: 'anthropic', port: 18703, target: 'https://api.anthropic.com', paths: ['/v1/messages'] },
+];
+
+export function defaultConfig(): AppConfig {
+  return {
+    maskEnabled: true,
+    egressProxy: '',
+    upstreams: structuredClone(DEFAULT_UPSTREAMS),
+    mask: structuredClone(DEFAULT_MASK_CONFIG),
+  };
+}
+
+/** 读配置：缺失字段用默认值补齐（新增规则开关时旧配置自动获得默认值）。 */
+export function loadConfig(file: string): AppConfig {
+  const def = defaultConfig();
+  if (!fs.existsSync(file)) return def;
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<AppConfig>;
+  return {
+    maskEnabled: raw.maskEnabled ?? def.maskEnabled,
+    egressProxy: raw.egressProxy ?? def.egressProxy,
+    upstreams: raw.upstreams ?? def.upstreams,
+    mask: {
+      builtinRules: { ...def.mask.builtinRules, ...raw.mask?.builtinRules },
+      secretPrefixes: raw.mask?.secretPrefixes ?? def.mask.secretPrefixes,
+      customWords: raw.mask?.customWords ?? def.mask.customWords,
+    },
+  };
+}
+
+export function saveConfig(file: string, config: AppConfig): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(config, null, 2), 'utf8');
+}

@@ -1,0 +1,51 @@
+{
+  "name": "data-maskit",
+  "version": "0.1.0",
+  "description": "本地 LLM 隐私脱敏与还原网关（Electron 桌面版）",
+  "main": "./public/electron/main.js",
+  "scripts": {
+    "dev": "ee-bin dev",
+    "build": "npm run build-frontend && npm run build-electron && ee-bin encrypt",
+    "start": "ee-bin start",
+    "dev-frontend": "ee-bin dev --serve=frontend",
+    "dev-electron": "ee-bin dev --serve=electron",
+    "build-frontend": "ee-bin build --cmds=frontend && ee-bin move --flag=frontend_dist",
+    "build-electron": "ee-bin build --cmds=electron",
+    "icon": "ee-bin icon",
+    "re-sqlite": "electron-rebuild -f -w better-sqlite3",
+    "build-w": "ee-bin build --cmds=win64",
+    "build-we": "ee-bin build --cmds=win_e",
+    "build-m": "ee-bin build --cmds=mac_arm64",
+    "build-m-x86": "ee-bin build --cmds=mac",
+    "build-m-arm64": "ee-bin build --cmds=mac_arm64",
+    "build-l": "ee-bin build --cmds=linux",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "repository": "https://github.com/wangneal369/maskit-node.git",
+  "keywords": [
+    "LLM",
+    "privacy",
+    "data-masking",
+    "Electron",
+    "electron-egg"
+  ],
+  "author": "wangneal369 <wangneal369@users.noreply.github.com>",
+  "license": "AGPL-3.0-only",
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.1",
+    "@types/node": "^22.19.1",
+    "debug": "^4.4.0",
+    "ee-bin": "^5.0.0",
+    "electron": "^39.8.10",
+    "electron-builder": "^26.3.5",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  },
+  "dependencies": {
+    "ee-core": "^5.0.1",
+    "electron-updater": "^6.7.3",
+    "undici": "^7.30.0"
+  },
+  "homepage": "https://github.com/wangneal369/maskit-node"
+}

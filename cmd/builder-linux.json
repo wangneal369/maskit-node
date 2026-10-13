@@ -1,0 +1,33 @@
+{
+  "productName": "DataMaskit",
+  "appId": "com.wangneal369.datamaskit",
+  "copyright": "© 2026 wangneal369 · AGPL-3.0",
+  "directories": {
+    "output": "out"
+  },
+  "asar": true,
+  "electronLanguages": [
+    "en-US",
+    "zh-CN"
+  ],
+  "files": [
+    "public",
+    "package.json",
+    "node_modules/**/*"
+  ],
+  "extraResources": [
+    {
+      "from": "build/extraResources",
+      "to": "extraResources"
+    }
+  ],
+  "publish": null,
+  "linux": {
+    "icon": "build/icons/icon.png",
+    "artifactName": "${productName}-${os}-${version}-${arch}.${ext}",
+    "target": [
+      "deb"
+    ],
+    "category": "Utility"
+  }
+}
