@@ -13,7 +13,8 @@ import { EventEmitter } from 'node:events';
 import http from 'node:http';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { maskBody, Restorer, SseRestorer, type Masker } from '../core';
-import type { GatewayEvent } from './proxy';
+import type { GatewayEvent, GatewayNer } from './proxy';
+import { entityMap, requestTexts } from '../ner/request-texts';
 import { maskOoxml } from './ooxml';
 
 /** 与扩展 shared.js 的 EXT_PROTOCOL_VERSION 对齐：/api/ext/* 契约变化时才 +1 */
@@ -31,6 +32,8 @@ export interface ExtBridgeConfig {
   /** 引擎不可达时扩展是否阻断请求（扩展侧读 ping 里的这个开关） */
   blockWhenEngineDown: boolean;
   recordEvents: boolean;
+  /** 旧版 .doc / .xls 附件：有损提取纯文本后重建为 OOXML 再脱敏（格式全丢，默认关闭） */
+  convertLegacyOffice: boolean;
 }
 
 export const DEFAULT_EXT_CONFIG: ExtBridgeConfig = {
@@ -39,6 +42,7 @@ export const DEFAULT_EXT_CONFIG: ExtBridgeConfig = {
   token: '',
   blockWhenEngineDown: false,
   recordEvents: true,
+  convertLegacyOffice: false,
 };
 
 export function generateExtToken(): string {
@@ -90,6 +94,12 @@ export class ExtBridge extends EventEmitter {
   private config: ExtBridgeConfig = { ...DEFAULT_EXT_CONFIG };
   private readonly sessions = new Map<string, Session>();
   private readonly stats = { mask: 0, restore: 0 };
+  /** 本地 NER（null/undefined = 未启用）；失败只降级并记入事件，绝不阻断 */
+  ner?: GatewayNer | null;
+  /** 监听地址：默认仅回环；Docker/无头部署由服务端设为 0.0.0.0 */
+  listenHost = '127.0.0.1';
+  /** 非回环监听时额外接受的 Host 主机名（不含端口，可带任意映射端口） */
+  publicHosts: string[] = [];
 
   constructor(private readonly masker: Masker, private readonly version: string) {
     super();
@@ -114,7 +124,7 @@ export class ExtBridge extends EventEmitter {
     });
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
-      server.listen(config.port, '127.0.0.1', () => resolve());
+      server.listen(config.port, this.listenHost, () => resolve());
     });
     this.server = server;
   }
@@ -130,6 +140,21 @@ export class ExtBridge extends EventEmitter {
     });
   }
 
+  /**
+   * Host 校验（防 DNS 重绑定）。回环监听：仅 127.0.0.1/localhost + 本端口。
+   * 非回环监听（Docker）：端口常被映射成别的值，所以放宽端口；主机名只接受
+   * IP 字面量、localhost 与 publicHosts（重绑定攻击必须用域名，IP 字面量无法被劫持解析）。
+   */
+  private hostAllowed(hostHeader: string, port: number): boolean {
+    if ([`127.0.0.1:${port}`, `localhost:${port}`].includes(hostHeader)) return true;
+    if (this.listenHost === '127.0.0.1' || this.listenHost === '::1' || this.listenHost === 'localhost') return false;
+    const m = /^(\[[0-9a-fA-F:.]+\]|[^:]+)(?::\d{1,5})?$/.exec(hostHeader);
+    if (!m) return false;
+    const name = m[1].toLowerCase();
+    if (name === 'localhost' || name.startsWith('[') || /^\d{1,3}(\.\d{1,3}){3}$/.test(name)) return true;
+    return this.publicHosts.some((h) => h.toLowerCase() === name);
+  }
+
   private send(res: http.ServerResponse, status: number, body: unknown): void {
     if (res.headersSent) return;
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
@@ -142,7 +167,7 @@ export class ExtBridge extends EventEmitter {
 
     // DNS 重绑定防护：Host 必须是本机回环地址
     const port = this.config.port;
-    if (![`127.0.0.1:${port}`, `localhost:${port}`].includes(String(req.headers.host ?? ''))) {
+    if (!this.hostAllowed(String(req.headers.host ?? ''), port)) {
       return this.send(res, 403, { ok: false, error: 'host_rejected' });
     }
     // 网页上下文的 Origin 一律拒绝；扩展 SW 的 POST 带 chrome-extension:// 等来源
@@ -213,18 +238,42 @@ export class ExtBridge extends EventEmitter {
     return [id, s];
   }
 
-  private mask(res: http.ServerResponse, data: Record<string, unknown>): void {
+  /** 跑 NER：JSON 体取字符串叶子，其余整段当一条文本。失败不抛，错误进 ner 概况 */
+  private async runNer(text: string): Promise<{ entities?: Map<string, string>; ner?: GatewayEvent['ner'] }> {
+    const ner = this.ner;
+    if (!ner) return {};
+    let texts: string[];
+    try {
+      const parsed = JSON.parse(text);
+      texts = parsed !== null && typeof parsed === 'object' ? requestTexts(parsed) : [text];
+    } catch {
+      texts = [text];
+    }
+    if (!texts.length) return { ner: { entities: 0, truncated: false } };
+    try {
+      const r = await ner.extract(texts, ner.budgetMs);
+      const entities = entityMap(r.entities);
+      return { entities, ner: { entities: entities.size, truncated: r.truncated, ...(r.error ? { error: r.error } : {}) } };
+    } catch (e) {
+      return { ner: { entities: 0, truncated: false, error: `ner_failed: ${(e as Error).message}` } };
+    }
+  }
+
+  private async mask(res: http.ServerResponse, data: Record<string, unknown>): Promise<void> {
     const text = data.text;
     if (typeof text !== 'string' || !text) return this.send(res, 400, { ok: false, error: 'bad_request', blocking: true });
     const started = Date.now();
     const [sid] = this.session(data.sid, true)!;
     try {
-      const r = maskBody(this.masker, text);
+      // NER 看未脱敏原文，必须先于 maskBody；降级时规则照常生效
+      const { entities, ner } = await this.runNer(text);
+      const r = maskBody(this.masker, text, entities ? { entities } : undefined);
       this.stats.mask++;
-      if (r.hits.length) {
+      // NER 出错/超时也要留痕（即便没有命中）：静默降级等于“以为开了、其实没脱”
+      if (r.hits.length || ner?.error || ner?.truncated) {
         this.record({
           method: 'EXT', path: '/ext/mask', host: data.host, started,
-          hits: r.hits.map(({ label, token }) => ({ label, token })), signedBlocksSkipped: r.signedBlocksSkipped,
+          hits: r.hits.map(({ label, token }) => ({ label, token })), signedBlocksSkipped: r.signedBlocksSkipped, ner,
         });
       }
       this.send(res, 200, { ok: true, masked_text: r.text, sid });
@@ -244,7 +293,9 @@ export class ExtBridge extends EventEmitter {
     const started = Date.now();
     const [sid] = this.session(data.sid, true)!;
     try {
-      const r = maskOoxml(Buffer.from(b64, 'base64'), filename, this.masker);
+      const r = maskOoxml(Buffer.from(b64, 'base64'), filename, this.masker, {
+        convertLegacyOffice: this.config.convertLegacyOffice,
+      });
       this.stats.mask++;
       if (r.hits) this.record({ method: 'EXT', path: `/ext/mask-file:${filename}`, host: data.host, started, hitCount: r.hits });
       this.send(res, 200, { ok: true, base64: Buffer.from(r.bytes).toString('base64'), sid, hit_count: r.hits });
@@ -311,7 +362,7 @@ export class ExtBridge extends EventEmitter {
   private record(e: {
     method: string; path: string; host: unknown; started: number; status?: number; error?: string;
     hits?: GatewayEvent['hits']; signedBlocksSkipped?: number; restored?: number; unresolved?: number;
-    stream?: boolean; hitCount?: number;
+    stream?: boolean; hitCount?: number; ner?: GatewayEvent['ner'];
   }): void {
     if (!this.config.recordEvents) return;
     const ev: GatewayEvent = {
@@ -328,6 +379,7 @@ export class ExtBridge extends EventEmitter {
       unresolved: e.unresolved ?? 0,
       signedBlocksSkipped: e.signedBlocksSkipped ?? 0,
       error: e.error,
+      ...(e.ner ? { ner: e.ner } : {}),
     };
     this.emit('event', ev);
   }

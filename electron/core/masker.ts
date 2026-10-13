@@ -3,7 +3,7 @@
  */
 import { mapOutsidePlaceholders } from './placeholder';
 import {
-  buildPrefixRegex, DEFAULT_BUILTIN_RULES, DEFAULT_SECRET_PREFIXES, RULE_MARKERS, RULES,
+  buildPrefixRegex, DEFAULT_BUILTIN_RULES, DEFAULT_SECRET_PREFIXES, RULE_MARKERS, RULE_MARKERS_CI, RULES,
   type Rule, type RuleLabel,
 } from './rules';
 import { MappingStore } from './store';
@@ -90,8 +90,12 @@ export class Masker {
     this.wordPlans = buildWordPlans(config.customWords);
   }
 
-  /** 脱敏单段文本；hits 收集本次命中（同一原文只记一次）。 */
-  mask(text: string, hits?: Map<string, MaskHit>): string {
+  /**
+   * 脱敏单段文本；hits 收集本次命中（同一原文只记一次）。
+   * entities：NER 识别出的实体（key = 实体原文，value = 标签 NAME/ORG/ADDR），
+   * 在全部确定性规则之后替换，占位符内部不动；不传则行为与旧版完全一致。
+   */
+  mask(text: string, hits?: Map<string, MaskHit>, entities?: ReadonlyMap<string, string>): string {
     if (!text) return text;
     const hit = (orig: string, label: string, pinned = false): string => {
       const token = this.store.tokenFor(orig, label, pinned);
@@ -116,14 +120,54 @@ export class Masker {
       }));
     }
 
+    let lower: string | undefined;
     for (const rule of RULES) {
       if (!this.config.builtinRules[rule.label]) continue;
       const markers = RULE_MARKERS[rule.label];
-      if (markers && !markers.some((mk) => text.includes(mk))) continue;
-      text = mapOutsidePlaceholders(text, (c) => applyRule(c, rule, hit));
+      if (markers) {
+        // 大小写不敏感的规则（如 IPv6 十六进制）按小写文本比对标记；小写副本惰性生成一次
+        const hay = RULE_MARKERS_CI.has(rule.label) ? (lower ??= text.toLowerCase()) : text;
+        if (!markers.some((mk) => hay.includes(mk))) continue;
+      }
+      const next = mapOutsidePlaceholders(text, (c) => applyRule(c, rule, hit));
+      if (next !== text) {
+        text = next;
+        lower = undefined; // 文本变了，小写副本作废
+      }
+    }
+
+    const ent = entities && entities.size ? entityPlan(entities) : null;
+    if (ent) {
+      text = mapOutsidePlaceholders(text, (c) => c.replace(ent.rx, (m) => hit(m, ent.labels.get(m) ?? 'NAME')));
     }
     return text;
   }
+}
+
+/** 实体最短长度：单字实体（常见字/姓氏）误伤面太大，与 Python 引擎口径一致 */
+const MIN_ENTITY_CHARS = 2;
+
+interface EntityPlan {
+  rx: RegExp;
+  labels: ReadonlyMap<string, string>;
+}
+
+/**
+ * 实体合并正则按 Map 对象缓存：maskJson 对每个字符串叶子各调一次 mask，
+ * 每叶子重建一次正则就是 O(叶子数 × 实体数)（Python 版踩过的坑）。
+ * 一条正则、最长优先的交替，对每个叶子只扫一遍。
+ */
+const entityPlans = new WeakMap<ReadonlyMap<string, string>, EntityPlan | null>();
+
+function entityPlan(entities: ReadonlyMap<string, string>): EntityPlan | null {
+  let plan = entityPlans.get(entities);
+  if (plan !== undefined) return plan;
+  const words = [...entities.keys()].filter((w) => w.length >= MIN_ENTITY_CHARS).sort((a, b) => b.length - a.length);
+  plan = words.length
+    ? { rx: new RegExp(words.map((w) => w.replace(ESC_RX, '\\$&')).join('|'), 'g'), labels: entities }
+    : null;
+  entityPlans.set(entities, plan);
+  return plan;
 }
 
 function applyRule(text: string, rule: Rule, hit: (orig: string, label: string) => string): string {

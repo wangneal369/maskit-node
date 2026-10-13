@@ -15,6 +15,8 @@ import type { AuditFinding } from '../core/audit';
 import { CommandScanner, DEFAULT_COMMAND_BLOCK } from '../core/command-block';
 import { modelFromJson, type Usage } from '../core/usage';
 import { ResponseInspector, type CommandRecord, type InspectPolicy } from './inspect';
+import type { NerEntity } from '../ner/engine';
+import { entityMap, requestTexts } from '../ner/request-texts';
 
 export interface Upstream {
   name: string;
@@ -23,6 +25,13 @@ export interface Upstream {
   target: string;
   /** 需要脱敏的路径（精确或后缀匹配），其余路径原样透传 */
   paths: string[];
+}
+
+/** 本地 NER 适配（NerEngine.extractMany 即满足）；失败走 error 字段上报，绝不阻断请求 */
+export interface GatewayNer {
+  extract(texts: string[], budgetMs: number): Promise<{ entities: NerEntity[]; truncated: boolean; error?: string }>;
+  /** 单个请求的 NER 总预算（毫秒） */
+  budgetMs: number;
 }
 
 export interface GatewayEvent {
@@ -52,6 +61,8 @@ export interface GatewayEvent {
   findings?: AuditFinding[];
   /** 命中的危险命令 */
   commands?: CommandRecord[];
+  /** 本地 NER 概况：失败/超时降级必须在这里可见（规则脱敏仍照常生效） */
+  ner?: { entities: number; truncated: boolean; error?: string };
 }
 
 const MAX_BODY = 32 * 1024 * 1024;
@@ -148,6 +159,10 @@ export class Gateway extends EventEmitter {
   private servers = new Map<number, http.Server>();
   /** false = 原样透传（端口保持监听，客户端不会断网） */
   maskEnabled = true;
+  /** 监听地址：默认仅回环；Docker/无头部署由服务端设为 0.0.0.0 */
+  listenHost = '127.0.0.1';
+  /** 本地 NER（null/undefined = 未启用）；只补充规则覆盖不到的人名/机构/地址 */
+  ner?: GatewayNer | null;
   /** 当前出网代理（null = 直连） */
   egressProxy: string | null = null;
   private dispatcher: Dispatcher = new Agent();
@@ -158,6 +173,18 @@ export class Gateway extends EventEmitter {
   constructor(private readonly masker: Masker) {
     super();
   }
+
+  /**
+   * 经当前出网代理发起请求（模型下载、上游连通性测试）：与转发请求走同一条出网路径，
+   * 用户配了代理时不会出现「网关能通、下载不通」。本机地址始终直连。
+   */
+  readonly egressFetch: typeof globalThis.fetch = (input, init) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    return fetch(url, {
+      ...(init as object),
+      dispatcher: isLoopback(url) ? this.direct : this.dispatcher,
+    }) as unknown as Promise<globalThis.Response>;
+  };
 
   /** 切换出网代理：国内网络通常需要经本机代理访问上游，Node 的 fetch 不会自动读系统代理 */
   setEgressProxy(url: string | null): void {
@@ -180,7 +207,7 @@ export class Gateway extends EventEmitter {
       });
       await new Promise<void>((resolve, reject) => {
         server.once('error', reject);
-        server.listen(up.port, '127.0.0.1', () => resolve());
+        server.listen(up.port, this.listenHost, () => resolve());
       });
       this.servers.set(up.port, server);
     }
@@ -227,7 +254,9 @@ export class Gateway extends EventEmitter {
         const requestText = body.toString('utf8');
         const parsed = JSON.parse(requestText);
         inspector = new ResponseInspector(this.policy, requestText, modelFromJson(parsed));
-        const result = maskJson(this.masker, parsed);
+        // NER 在 maskJson 之前跑：它看的是未脱敏原文。失败/超时只降级（规则照常生效），并记入事件
+        const entities = await this.runNer(parsed, ev);
+        const result = maskJson(this.masker, parsed, entities ? { entities } : undefined);
         // 没命中就一个字节都不改，保住上游前缀缓存
         if (result.changed) body = Buffer.from(JSON.stringify(result.body), 'utf8');
         ev.hits = result.hits.map(({ label, token }) => ({ label, token }));
@@ -337,6 +366,25 @@ export class Gateway extends EventEmitter {
     if (restorer.stats.degraded) ev.degraded = restorer.stats.degraded;
     inspector?.finish(ev);
     this.finish(ev, started);
+  }
+
+  private async runNer(parsed: unknown, ev: GatewayEvent): Promise<Map<string, string> | undefined> {
+    const ner = this.ner;
+    if (!ner) return undefined;
+    const texts = requestTexts(parsed);
+    if (!texts.length) {
+      ev.ner = { entities: 0, truncated: false };
+      return undefined;
+    }
+    try {
+      const r = await ner.extract(texts, ner.budgetMs);
+      const entities = entityMap(r.entities);
+      ev.ner = { entities: entities.size, truncated: r.truncated, ...(r.error ? { error: r.error } : {}) };
+      return entities;
+    } catch (e) {
+      ev.ner = { entities: 0, truncated: false, error: `ner_failed: ${(e as Error).message}` };
+      return undefined;
+    }
   }
 
   private finish(ev: GatewayEvent, started: number): void {

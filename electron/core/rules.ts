@@ -4,12 +4,13 @@
  */
 import {
   cardOk, connstrOk, emailOk, ibanOk, idcardOk, jwtOk, landlineOk, phoneOk,
+  ipPublicOk, ipv6PrivateOk, usccOk,
 } from './validators';
 
 export type RuleLabel =
   | 'PRIVATE_KEY' | 'API_KEY' | 'ACCESS_KEY' | 'JWT' | 'TOKEN' | 'SECRET' | 'CONNSTR'
   | 'PHONE' | 'EMAIL' | 'LANDLINE' | 'PLATE' | 'HKID' | 'IDCARD'
-  | 'IP_PRIVATE' | 'IP_INTERNAL' | 'CARD' | 'IBAN' | 'MAC';
+  | 'IP_PRIVATE' | 'IP_INTERNAL' | 'IPV6_PRIVATE' | 'IP_PUBLIC' | 'CARD' | 'IBAN' | 'USCC' | 'MAC';
 
 export interface Rule {
   rx: RegExp;
@@ -22,6 +23,11 @@ export interface Rule {
 const ID_BOUND_L = '(?<![A-Za-z0-9])';
 const ID_BOUND_R = '(?![A-Za-z0-9])';
 const IP_BOUND_R = '(?![A-Za-z0-9]|\\.\\d)';
+// 公网 IPv4 专用边界：强防误伤定宽断言
+// 左边界：挡住字母数字、字母数字连字符/下划线、包名域名点号前缀与多段版本截断
+const IP_PUBLIC_BOUND_L = '(?<![A-Za-z0-9][-_])(?<![A-Za-z0-9]\\.)(?<![A-Za-z0-9])';
+// 右边界：挡住字母数字、点号文件后缀（.jar/.tar.gz/.js）与连字符标签/构建号后缀（-beta/-SNAPSHOT/-5）
+const IP_PUBLIC_BOUND_R = '(?![A-Za-z0-9]|\\.[A-Za-z0-9]|[-_][A-Za-z0-9])';
 const MOBILE_CC = '(?:(?:\\+?86|0086|[\\(（]\\+?86[\\)）])[\\s-]?)?';
 
 /** 全局 + 捕获组下标（d）是必须的：分组替换要拿到组的精确区间。 */
@@ -80,8 +86,17 @@ export const RULES: Rule[] = [
   { label: 'IP_PRIVATE', group: 0, rx: rx(`${ID_BOUND_L}(?:192\\.168\\.\\d{1,3}\\.\\d{1,3}|169\\.254\\.\\d{1,3}\\.\\d{1,3})${IP_BOUND_R}`) },
   { label: 'IP_PRIVATE', group: 0, rx: rx(`${ID_BOUND_L}100\\.(?:6[4-9]|[7-9]\\d|1[01]\\d|12[0-7])\\.\\d{1,3}\\.\\d{1,3}${IP_BOUND_R}`) },
   { label: 'IP_INTERNAL', group: 0, rx: rx(`${ID_BOUND_L}(?:10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|172\\.(?:1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3})${IP_BOUND_R}`) },
+  // IPv6 私网地址（fe80:: 链路本地 / fc00::/7 ULA）：宽正则抓候选，_ipv6_private_ok 保证只脱私网段
+  { label: 'IPV6_PRIVATE', group: 0, validate: ipv6PrivateOk, rx: rx('(?<![0-9A-Fa-f.])[0-9A-Fa-f:]{2,45}(?![0-9A-Fa-f:])') },
+  // 公网 IPv4：严格限定各段 0-255，_ip_public_ok 剔除私网保留段、组播与知名公共 DNS
+  {
+    label: 'IP_PUBLIC', group: 0, validate: ipPublicOk,
+    rx: rx(`${IP_PUBLIC_BOUND_L}(?:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d?|[1-9])(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3})${IP_PUBLIC_BOUND_R}`),
+  },
   { label: 'CARD', group: 0, validate: cardOk, rx: rx(`${ID_BOUND_L}(?:[3-6]\\d{12,18}|[3-6]\\d{2,5}(?:([ -])\\d{1,6}){1,4})${ID_BOUND_R}`) },
   { label: 'IBAN', group: 0, validate: ibanOk, rx: rx(`${ID_BOUND_L}[A-Z]{2}\\d{2}[A-Z0-9]{11,30}${ID_BOUND_R}`) },
+  // 统一社会信用代码：18 位，需过 GB 32100-2015 校验
+  { label: 'USCC', group: 0, validate: usccOk, rx: rx(`${ID_BOUND_L}[0-9A-HJ-NPQRTUWXY]{2}\\d{6}[0-9A-HJ-NPQRTUWXY]{10}${ID_BOUND_R}`) },
   { label: 'MAC', group: 0, rx: rx('(?<![0-9A-Fa-f:-])[0-9A-Fa-f]{2}([:-])(?:[0-9A-Fa-f]{2}\\1){4}[0-9A-Fa-f]{2}(?![0-9A-Fa-f:-])') },
 ];
 
@@ -99,13 +114,21 @@ export const RULE_MARKERS: Partial<Record<RuleLabel, string[]>> = {
   LANDLINE: ['0'],
   IP_PRIVATE: ['192.', '169.', '100.'],
   IP_INTERNAL: ['10.', '172.'],
+  // IPv6 私网首组必是 fe80-febf（fe8/fe9/fea/feb）或 fc00-fdff（fc/fd）
+  // 只列小写：该规则按大小写不敏感比对（见 RULE_MARKERS_CI）
+  IPV6_PRIVATE: ['fe8', 'fe9', 'fea', 'feb', 'fc', 'fd'],
+  IP_PUBLIC: ['.'],  // 公网 IP 最保险特征就是含小数点（避免与版本号混淆）
+  USCC: ['A', 'H', 'J', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'T', 'U', 'W', 'X', 'Y'],  // 排除 I/O/S/V/Z 的字母标记
 };
+
+/** 预检需要大小写不敏感的规则标签 */
+export const RULE_MARKERS_CI = new Set<RuleLabel>(['IPV6_PRIVATE']);
 
 /** 默认开启 7 类核心规则，其余按需开启。 */
 export const DEFAULT_BUILTIN_RULES: Record<RuleLabel, boolean> = {
   API_KEY: true, CARD: true, CONNSTR: true, EMAIL: true, IDCARD: true, LANDLINE: true, PHONE: true,
   ACCESS_KEY: false, HKID: false, IBAN: false, IP_INTERNAL: false, IP_PRIVATE: false,
-  JWT: false, MAC: false, PLATE: false, PRIVATE_KEY: false, SECRET: false, TOKEN: false,
+  IPV6_PRIVATE: false, IP_PUBLIC: false, JWT: false, MAC: false, PLATE: false, PRIVATE_KEY: false, SECRET: false, TOKEN: false, USCC: false,
 };
 
 export const DEFAULT_SECRET_PREFIXES = ['sk-', 'ah-', 'ghp_', 'glpat-', 'xoxb-', 'xoxp-', 'pypi-', 'npm_', 'dify-'];

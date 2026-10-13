@@ -18,11 +18,24 @@ const ipcApiRoute = {
   gatewaySkillAgentsSnippet: 'controller/gateway/skillAgentsSnippet',
   gatewayStats: 'controller/gateway/stats',
   gatewayFlagged: 'controller/gateway/flagged',
+  gatewayDownloadNerModel: 'controller/gateway/downloadNerModel',
+  gatewaySelfCheck: 'controller/gateway/selfCheck',
+  gatewayTestUpstreams: 'controller/gateway/testUpstreams',
+  gatewayCheckUpdate: 'controller/gateway/checkUpdate',
+  gatewayListConfigBackups: 'controller/gateway/listConfigBackups',
+  gatewayRestoreConfigBackup: 'controller/gateway/restoreConfigBackup',
+  gatewayExportConfig: 'controller/gateway/exportConfig',
+  gatewayImportConfig: 'controller/gateway/importConfig',
+  gatewayExportDiagnostics: 'controller/gateway/exportDiagnostics',
+  gatewayExportConfigFile: 'controller/gateway/exportConfigFile',
+  gatewayImportConfigFile: 'controller/gateway/importConfigFile',
+  gatewayAutostartStatus: 'controller/gateway/autostartStatus',
 }
 
 /** 主进程推送的事件名 */
 const pushEvents = {
   gatewayEvent: 'maskit/event',
+  updateAvailable: 'maskit/update',
 }
 
 export {

@@ -41,6 +41,11 @@
                   <span v-if="ev.cost" style="margin-left:12px">费用：<span class="mono" style="color:var(--warn)">${{ ev.cost.toFixed(4) }}</span></span>
                 </div>
                 <div v-if="ev.signedBlocksSkipped" class="sub" style="margin-bottom:6px">跳过签名块：{{ ev.signedBlocksSkipped }}</div>
+                <div v-if="ev.ner" class="sub" style="margin-bottom:6px">
+                  语义识别：识别实体 {{ ev.ner.entities }} 个
+                  <span v-if="ev.ner.truncated" class="badge warn" style="margin-left:6px">已截断</span>
+                  <span v-if="ev.ner.error" class="ner-err">错误：{{ ev.ner.error }}</span>
+                </div>
                 <div v-if="!ev.hits?.length" class="sub">本次请求无命中</div>
                 <div v-else class="row wrap">
                   <span v-for="(h, i) in ev.hits" :key="i" class="hit"><span class="badge">{{ h.label }}</span> <span class="mono">{{ h.token }}</span></span>
@@ -126,4 +131,5 @@ onBeforeUnmount(() => off());
 .clickable { cursor: pointer; &:hover { background: #f7f9fc; } }
 .detail td { background: #fafbfd; }
 .hit { margin-right: 12px; }
+.ner-err { color: var(--danger); margin-left: 6px; word-break: break-all; }
 </style>

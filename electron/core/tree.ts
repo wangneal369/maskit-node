@@ -73,13 +73,19 @@ export interface TreeMaskResult {
   signedBlocksSkipped: number;
 }
 
-export function maskJson(masker: Masker, root: Json): TreeMaskResult {
+export interface MaskJsonOptions {
+  /** NER 实体：key = 实体原文，value = 标签（NAME/ORG/ADDR）；不传则只跑确定性规则 */
+  entities?: ReadonlyMap<string, string>;
+}
+
+export function maskJson(masker: Masker, root: Json, opts?: MaskJsonOptions): TreeMaskResult {
   const hits = new Map<string, MaskHit>();
+  const entities = opts?.entities;
   let changed = false;
   let signedBlocksSkipped = 0;
 
   const maskStr = (s: string): string => {
-    const out = masker.mask(s, hits);
+    const out = masker.mask(s, hits, entities);
     if (out !== s) changed = true;
     return out;
   };

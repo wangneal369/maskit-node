@@ -20,6 +20,9 @@
       <div v-if="status.storage" class="sub" style="margin-top:8px">
         日志 {{ status.storage.events }} 条 · 已持久化映射 {{ status.storage.persistedMappings }} 条
       </div>
+      <div v-if="status.ner && status.ner.enabled" class="sub" style="margin-top:8px">
+        语义识别：<span class="badge" :class="nerBadgeClass">{{ nerText }}</span>
+      </div>
       <div v-if="status.lastError" class="badge bad" style="margin-top:10px;white-space:pre-wrap">{{ status.lastError }}</div>
       <div v-if="status.storage && status.storage.error" class="badge bad" style="margin-top:10px;white-space:pre-wrap">{{ status.storage.error }}</div>
     </div>
@@ -45,15 +48,32 @@
   </div>
 </template>
 <script setup>
-import { reactive, ref, onMounted, onBeforeUnmount } from 'vue';
+import { computed, reactive, ref, onMounted, onBeforeUnmount } from 'vue';
 import { gw } from '@/utils/gateway';
 import { toast } from '@/utils/toast';
 
-const status = reactive({ maskEnabled: true, listening: [], upstreams: [], mappings: 0, lastError: '', storage: null });
+const status = reactive({ maskEnabled: true, listening: [], upstreams: [], mappings: 0, lastError: '', storage: null, ner: null });
 const busy = ref(false);
 let timer = null;
 
 const apply = (s) => { if (s) Object.assign(status, s); };
+
+/** 语义识别状态文案：错误 > 加载中 > 已就绪 > 未安装模型 */
+const nerText = computed(() => {
+  const n = status.ner || {};
+  if (n.error || n.model?.error) return '错误';
+  if (n.loading) return '加载中';
+  if (n.ready) return '已就绪';
+  if (n.model && !n.model.installed) return '未安装模型';
+  return '已安装（待加载）';
+});
+const nerBadgeClass = computed(() => {
+  const t = nerText.value;
+  if (t === '错误') return 'bad';
+  if (t === '已就绪') return 'ok';
+  if (t === '加载中' || t === '未安装模型') return 'warn';
+  return '';
+});
 const baseUrl = (u) => `http://127.0.0.1:${u.port}`;
 const hint = (u) => /anthropic/i.test(u.name + u.target)
   ? 'Anthropic：Base URL 无需后缀'

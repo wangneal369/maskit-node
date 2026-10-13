@@ -9,3 +9,4 @@ data/
 public/electron/
 pnpm-lock.yaml
 .tmp-shots/
+dist-server/

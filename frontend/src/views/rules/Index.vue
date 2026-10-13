@@ -20,6 +20,36 @@
     </div>
 
     <div class="card">
+      <div class="card-title">语义识别（NER）</div>
+      <div class="row" style="margin-bottom:12px;align-items:flex-start">
+        <div class="switch" :class="{ on: cfg.ner.enabled }" @click="toggleNer"></div>
+        <div class="grow">
+          <b>启用语义识别</b>
+          <div class="sub" style="margin-top:4px;line-height:1.7">本地识别人名、机构、地址，正则规则覆盖不到的部分由它补充。模型约 100MB，首次使用需下载；全部在本机推理，不上传任何内容。</div>
+          <div class="sub" style="margin-top:4px">模型来源：ckiplab/bert-base-chinese-ner（GPL-3.0）</div>
+        </div>
+      </div>
+      <div class="row" style="margin-bottom:12px">
+        <span>单次识别预算</span>
+        <input class="input mono" style="width:120px" type="number" min="100" max="10000" step="100" v-model.number="cfg.ner.budgetMs" />
+        <span class="sub">毫秒，范围 100–10000</span>
+      </div>
+      <div class="row wrap" style="margin-bottom:10px">
+        <span>模型状态</span>
+        <span v-for="(b, i) in nerBadges" :key="i" class="badge" :class="b.cls">{{ b.text }}</span>
+      </div>
+      <div v-if="nerErrorText" class="err-line" style="margin-bottom:10px">{{ nerErrorText }}</div>
+      <div class="row" style="margin-bottom:6px">
+        <button class="btn" :disabled="downloading || nerInstalled" @click="doDownloadNer">{{ downloading ? '下载中…' : '下载模型（约 78MB）' }}</button>
+        <span v-if="nerInstalled" class="sub">模型已安装，无需重复下载</span>
+      </div>
+      <div v-if="downloading" class="progress">
+        <div class="progress-bar" :style="{ width: dlPercent + '%' }"></div>
+      </div>
+      <div v-if="downloading" class="sub mono" style="margin-top:4px">{{ dlText }}</div>
+    </div>
+
+    <div class="card">
       <div class="card-title">密钥前缀</div>
       <div class="sub" style="margin-bottom:8px">命中这些前缀的字符串会被视为密钥脱敏。</div>
       <div v-for="(p, i) in cfg.mask.secretPrefixes" :key="i" class="row" style="margin-bottom:6px">
@@ -158,7 +188,7 @@
   <div class="page" v-else><div class="sub">{{ err || '加载中...' }}</div></div>
 </template>
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { gw, RULE_META } from '@/utils/gateway';
 import { toast } from '@/utils/toast';
 
@@ -166,6 +196,79 @@ const cfg = ref(null);
 const err = ref('');
 const saving = ref(false);
 const allowListText = ref('');
+
+// ---------- 语义识别（NER） ----------
+const nerStatus = ref(null);
+const downloading = ref(false);
+let nerPoll = null;
+
+const nerInstalled = computed(() => !!nerStatus.value?.model?.installed);
+
+const mb = (n) => {
+  const v = Number(n);
+  return Number.isFinite(v) && v >= 0 ? `${(v / 1024 / 1024).toFixed(1)} MB` : '—';
+};
+
+const nerBadges = computed(() => {
+  const n = nerStatus.value;
+  if (!n) return [{ text: '状态未知', cls: '' }];
+  const m = n.model || {};
+  const out = [];
+  if (n.error || m.error) out.push({ text: '错误', cls: 'bad' });
+  if (n.loading) out.push({ text: '加载中', cls: 'warn' });
+  if (n.ready) out.push({ text: '已就绪', cls: 'ok' });
+  if (m.installed) out.push({ text: m.sizeBytes != null ? `已安装 · ${mb(m.sizeBytes)}` : '已安装', cls: 'ok' });
+  else out.push({ text: '未安装', cls: 'warn' });
+  return out;
+});
+
+const nerErrorText = computed(() => nerStatus.value?.error || nerStatus.value?.model?.error || '');
+
+const dlProgress = computed(() => nerStatus.value?.model?.downloading || null);
+const dlPercent = computed(() => {
+  const p = dlProgress.value;
+  if (!p || !(p.total > 0)) return 0;
+  return Math.min(100, Math.round((p.received / p.total) * 100));
+});
+const dlText = computed(() => {
+  const p = dlProgress.value;
+  if (!p) return '准备下载…';
+  return p.total > 0 ? `${mb(p.received)} / ${mb(p.total)}（${dlPercent.value}%）` : `已接收 ${mb(p.received)}`;
+});
+
+async function refreshNer() {
+  try {
+    const s = await gw.status();
+    nerStatus.value = s?.ner || null;
+  } catch { /* 忽略：下次轮询或保存时重试 */ }
+}
+
+/** 未安装模型时不允许开启 */
+function toggleNer() {
+  if (!cfg.value.ner.enabled && !nerInstalled.value) return toast('请先下载模型', false);
+  cfg.value.ner.enabled = !cfg.value.ner.enabled;
+}
+
+async function doDownloadNer() {
+  if (downloading.value) return;
+  downloading.value = true;
+  // 下载期间每秒轮询 status() 刷新进度
+  nerPoll = setInterval(refreshNer, 1000);
+  try {
+    const s = await gw.downloadNerModel();
+    if (s?.ner) nerStatus.value = s.ner;
+    toast(nerInstalled.value ? '模型下载完成' : '模型下载结束，但未检测到安装', nerInstalled.value);
+  } catch (e) {
+    toast('模型下载失败：' + (e?.message || e), false);
+    await refreshNer();
+  } finally {
+    clearInterval(nerPoll);
+    nerPoll = null;
+    downloading.value = false;
+  }
+}
+
+onBeforeUnmount(() => { if (nerPoll) clearInterval(nerPoll); });
 
 const ruleLabels = computed(() => {
   const keys = Object.keys(cfg.value?.mask.builtinRules || {});
@@ -194,6 +297,7 @@ async function load() {
     c.storage = { persistMappings: true, maxEvents: 5000, ...(c.storage || {}) };
     c.commandBlock = { mode: 'observe', patterns: [], allow: [], ...(c.commandBlock || {}) };
     c.audit = { enabled: true, ...(c.audit || {}) };
+    c.ner = { enabled: false, budgetMs: 800, ...(c.ner || {}) };
     c.prices = c.prices || {};
     // Convert prices Record to list format for editing
     if (!c.prices.list) {
@@ -201,6 +305,7 @@ async function load() {
     }
     cfg.value = c;
     err.value = '';
+    refreshNer();
     // Update allowListText from allow array
     allowListText.value = (c.commandBlock.allow || []).join('\n');
   }
@@ -215,6 +320,15 @@ async function save() {
     if (!u.name.trim() || !u.target.trim() || !(u.port > 0 && u.port < 65536)) {
       return toast('上游的名称、目标地址和端口(1-65535)不能为空', false);
     }
+  }
+
+  const bm = Number(c.ner.budgetMs);
+  if (!Number.isInteger(bm) || bm < 100 || bm > 10000) return toast('NER 预算需为 100–10000 的整数（毫秒）', false);
+  c.ner.budgetMs = bm;
+  // 保存前重新确认模型状态，未安装时不允许保存为启用
+  if (c.ner.enabled) {
+    await refreshNer();
+    if (!nerInstalled.value) return toast('请先下载模型（或先关闭语义识别再保存）', false);
   }
 
   const me = Number(c.storage.maxEvents);
@@ -348,5 +462,19 @@ onMounted(load);
 
 input[type="radio"] {
   cursor: pointer;
+}
+
+.err-line { color: var(--danger); font-size: 13px; }
+
+.progress {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--bg);
+  overflow: hidden;
+  .progress-bar {
+    height: 100%;
+    background: var(--primary);
+    transition: width .3s;
+  }
 }
 </style>

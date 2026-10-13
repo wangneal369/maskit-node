@@ -1,0 +1,40 @@
+services:
+  maskit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/wangneal369/maskit-node:latest
+    container_name: maskit
+    restart: unless-stopped
+    ports:
+      # ⚠️ 网关端口（18701-18703）与扩展桥接端口（5801）本身没有鉴权，
+      # 只用于可信网络（本机 / 内网 / VPN）。默认只绑定本机回环；要让局域网其它机器访问，
+      # 设置 MASKIT_BIND_HOST=0.0.0.0，并确保网络可信或前置了鉴权（反向代理 / 防火墙）。
+      - "${MASKIT_BIND_HOST:-127.0.0.1}:18700:18700"   # Web 控制面板（需令牌）
+      - "${MASKIT_BIND_HOST:-127.0.0.1}:18701:18701"   # 上游网关：openai
+      - "${MASKIT_BIND_HOST:-127.0.0.1}:18702:18702"   # 上游网关：deepseek
+      - "${MASKIT_BIND_HOST:-127.0.0.1}:18703:18703"   # 上游网关：anthropic
+      - "${MASKIT_BIND_HOST:-127.0.0.1}:5801:5801"     # 浏览器扩展桥接（需在面板里启用）
+      # 在面板里新增了其它上游端口时，在这里同样加一行映射
+    volumes:
+      # 配置、SQLite（事件/映射）、面板令牌、NER 模型都在 /data。
+      # 命名卷由 Docker 管理权限（容器内以 uid 1000 非 root 运行）；
+      # 改成 bind mount（./maskit_data:/data）时需先 chown -R 1000:1000 ./maskit_data
+      - maskit_data:/data
+    environment:
+      - TZ=Asia/Shanghai
+      # 面板/API 令牌（至少 16 位）。留空则首次启动随机生成，打印一次到日志（docker logs maskit）并保存在 /data/panel-token
+      - MASKIT_TOKEN=${MASKIT_TOKEN:-}
+      # 也可用 Docker secret：MASKIT_TOKEN_FILE=/run/secrets/maskit_token（优先于 MASKIT_TOKEN）
+      # - MASKIT_TOKEN_FILE=/run/secrets/maskit_token
+      # 通过域名访问面板/扩展桥接时（反向代理等），把域名列在这里（逗号分隔，不含端口），否则 Host 校验会拒绝。
+      # 用 IP 或 localhost 访问时不需要。
+      - MASKIT_PUBLIC_HOST=${MASKIT_PUBLIC_HOST:-}
+      # 出网代理（需要经代理访问上游时）：在面板「概览」里设置，或取消下面注释
+      # - HTTPS_PROXY=http://host.docker.internal:7890
+      # 以下为镜像内默认值，一般无需改动
+      # - MASKIT_PANEL_PORT=18700
+      # - MASKIT_LISTEN_HOST=0.0.0.0
+
+volumes:
+  maskit_data:

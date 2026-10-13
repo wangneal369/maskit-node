@@ -38,6 +38,20 @@
     </div>
 
     <div class="card">
+      <div class="card-title">附件处理</div>
+      <div class="row" style="margin-bottom:10px;align-items:flex-start">
+        <div class="switch" :class="{ on: cfg.ext.convertLegacyOffice }" @click="cfg.ext.convertLegacyOffice = !cfg.ext.convertLegacyOffice"></div>
+        <div class="grow">
+          <b>转换旧版 Office 附件（.doc / .xls）</b>
+          <div class="sub" style="margin-top:4px">默认关闭：旧格式附件原样上传、不脱敏。</div>
+        </div>
+      </div>
+      <div class="warn-box">
+        有损转换：仅提取纯文本后重建为 docx / xlsx 再脱敏，图片、表格结构、样式全部丢失；即使没有敏感信息也会上传重建后的文件。默认关闭时旧格式附件原样上传、不脱敏。
+      </div>
+    </div>
+
+    <div class="card">
       <div class="card-title">访问令牌</div>
       <div class="sub" style="margin-bottom:8px">扩展通过请求头 X-Shield-Token 携带此令牌访问桥接服务，请勿泄露。</div>
       <div class="row">
@@ -53,11 +67,12 @@
       <div class="card-title">安装步骤</div>
       <ol class="steps">
         <li>
-          <div class="row">
+          <div v-if="isElectron" class="row">
             <span class="grow">点击「打开扩展目录」，找到随应用附带的扩展文件夹。</span>
             <button class="btn sm primary" @click="openDir">打开扩展目录</button>
           </div>
           <div v-if="dirPath" class="sub mono">{{ dirPath }}</div>
+          <span v-if="!isElectron">从项目仓库的 <span class="mono">extension/</span> 目录或 Release 里的扩展 zip 获取扩展文件夹（Docker 部署不含桌面端的“打开目录”功能）。</span>
         </li>
         <li>在 Chrome / Edge 地址栏打开 <span class="mono">chrome://extensions</span>，开启「开发者模式」，点击「加载已解压的扩展程序」，选择上一步的目录。</li>
         <li>打开扩展的「选项」页，引擎地址填 <span class="mono">{{ engineUrl }}</span>，并粘贴上方的访问令牌。</li>
@@ -72,6 +87,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { gw } from '@/utils/gateway';
 import { toast } from '@/utils/toast';
+import { isElectron as _isElectron } from '@/utils/ipcRenderer';
 
 const cfg = ref(null);
 const st = ref(null);
@@ -80,6 +96,7 @@ const saving = ref(false);
 const rotating = ref(false);
 const showToken = ref(false);
 const dirPath = ref('');
+const isElectron = _isElectron;
 let timer = null;
 
 const tokenText = computed(() => {
@@ -88,7 +105,7 @@ const tokenText = computed(() => {
   return showToken.value ? t : '•'.repeat(Math.min(t.length, 32));
 });
 
-const engineUrl = computed(() => `http://127.0.0.1:${st.value?.ext?.port || cfg.value?.ext.port || 5801}`);
+const engineUrl = computed(() => `http://${_isElectron ? '127.0.0.1' : location.hostname}:${st.value?.ext?.port || cfg.value?.ext.port || 5801}`);
 
 const statusClass = computed(() => {
   const e = st.value?.ext;
@@ -108,7 +125,12 @@ async function refreshStatus() {
 }
 
 async function load() {
-  try { cfg.value = await gw.getConfig(); err.value = ''; await refreshStatus(); }
+  try {
+    cfg.value = await gw.getConfig();
+    cfg.value.ext.convertLegacyOffice = !!cfg.value.ext.convertLegacyOffice;
+    err.value = '';
+    await refreshStatus();
+  }
   catch (e) { err.value = e?.message || String(e); }
 }
 
@@ -162,4 +184,8 @@ onBeforeUnmount(() => clearInterval(timer));
 }
 .token { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: #fafbfd; word-break: break-all; }
 .steps { margin: 0 0 12px; padding-left: 20px; li { margin-bottom: 10px; line-height: 1.7; } }
+.warn-box {
+  padding: 8px 12px; border-radius: 8px; font-size: 13px; line-height: 1.7;
+  background: var(--warn-soft); color: var(--warn);
+}
 </style>

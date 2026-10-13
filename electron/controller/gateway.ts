@@ -21,6 +21,12 @@ const SKILL_FILES = ['SKILL.md', 'README.md', 'README_EN.md', 'templates/AGENTS.
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** 本机时间戳 YYYYMMDD-HHmmss，用于导出文件默认名 */
+function fileStamp(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
 /**
  * 网关控制器：渲染进程通过 ipc channel `controller/gateway/<method>` 调用
  */
@@ -64,6 +70,10 @@ class GatewayController {
   async clearMappings() {
     gatewayService.clearMappings();
     return gatewayService.status();
+  }
+
+  async downloadNerModel() {
+    return gatewayService.downloadNerModel();
   }
 
   async rotateExtToken() {
@@ -111,6 +121,92 @@ class GatewayController {
   /** AGENTS.md 片段文本（给无法安装 Skill 的宿主粘贴用） */
   async skillAgentsSnippet(): Promise<string> {
     return fs.readFileSync(resourceDir(...SKILL_DIR, 'templates', 'AGENTS.snippet.md'), 'utf-8');
+  }
+
+  async selfCheck() {
+    return gatewayService.selfCheck();
+  }
+
+  async testUpstreams() {
+    return gatewayService.testUpstreams();
+  }
+
+  async diagnostics() {
+    return gatewayService.diagnostics();
+  }
+
+  /** 保存诊断 JSON（默认放在下载目录，文件内容已脱敏） */
+  async exportDiagnostics(): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }> {
+    try {
+      const data = await gatewayService.diagnostics();
+      const result = await dialog.showSaveDialog({
+        defaultPath: path.join(app.getPath('downloads'), `maskit-diagnostics-${fileStamp(new Date())}.json`),
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+      fs.writeFileSync(result.filePath, JSON.stringify(data, null, 2), 'utf-8');
+      return { ok: true, path: result.filePath };
+    } catch (e) {
+      return { ok: false, error: `导出失败：${errMsg(e)}` };
+    }
+  }
+
+  async checkUpdate() {
+    return gatewayService.checkUpdate();
+  }
+
+  async listConfigBackups() {
+    return gatewayService.listConfigBackups();
+  }
+
+  async restoreConfigBackup(args: { name: string }) {
+    return gatewayService.restoreConfigBackup(args);
+  }
+
+  async autostartStatus() {
+    return gatewayService.autostartStatus();
+  }
+
+  async exportConfig() {
+    return gatewayService.exportConfig();
+  }
+
+  async importConfig(args: { config: unknown }) {
+    await gatewayService.importConfig(args);
+    return gatewayService.status();
+  }
+
+  /** 导出完整配置为 JSON 文件（含扩展令牌，请妥善保管） */
+  async exportConfigFile(): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }> {
+    try {
+      const data = gatewayService.exportConfig();
+      const result = await dialog.showSaveDialog({
+        defaultPath: path.join(app.getPath('downloads'), 'maskit-config.json'),
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+      fs.writeFileSync(result.filePath, JSON.stringify(data, null, 2), 'utf-8');
+      return { ok: true, path: result.filePath };
+    } catch (e) {
+      return { ok: false, error: `导出失败：${errMsg(e)}` };
+    }
+  }
+
+  /** 从 JSON 文件导入配置；校验失败时不改动当前配置 */
+  async importConfigFile(): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }> {
+    try {
+      const result = await dialog.showOpenDialog({
+        properties: ['openFile'],
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      const file = result.filePaths[0];
+      if (result.canceled || !file) return { ok: false, canceled: true };
+      const config = JSON.parse(fs.readFileSync(file, 'utf-8')) as unknown;
+      await gatewayService.importConfig({ config });
+      return { ok: true, path: file };
+    } catch (e) {
+      return { ok: false, error: `导入失败：${errMsg(e)}` };
+    }
   }
 }
 export default GatewayController;

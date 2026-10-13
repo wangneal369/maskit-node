@@ -13,6 +13,7 @@ const constantRouterMap = [
   { path: '/rules', name: 'Rules', meta: { title: '规则' }, component: () => import('@/views/rules/Index.vue') },
   { path: '/extension', name: 'Extension', meta: { title: '浏览器扩展' }, component: () => import('@/views/extension/Index.vue') },
   { path: '/skill', name: 'Skill', meta: { title: '编程助手' }, component: () => import('@/views/skill/Index.vue') },
+  { path: '/system', name: 'System', meta: { title: '系统' }, component: () => import('@/views/system/Index.vue') },
 ]
 
 export default constantRouterMap
