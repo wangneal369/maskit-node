@@ -1,10 +1,11 @@
 import path from 'node:path';
-import { session } from 'electron';
+import { app, session } from 'electron';
 import { logger } from 'ee-core/log';
 import { getDataDir } from 'ee-core/ps';
 import { getMainWindow } from 'ee-core/electron';
 import { maskJson, Masker, MappingStore, Restorer } from '../core';
-import { loadConfig, saveConfig, type AppConfig } from '../gateway/config';
+import { loadConfig, normalizeExt, saveConfig, type AppConfig } from '../gateway/config';
+import { ExtBridge, generateExtToken } from '../gateway/ext-bridge';
 import { Gateway, type GatewayEvent } from '../gateway/proxy';
 
 const MAX_EVENTS = 200;
@@ -43,16 +44,20 @@ class GatewayService {
   private readonly store = new MappingStore();
   private readonly masker = new Masker(this.store);
   private readonly gateway = new Gateway(this.masker);
+  private readonly ext = new ExtBridge(this.masker, app.getVersion());
   private readonly events: GatewayEvent[] = [];
   private config!: AppConfig;
   private lastError = '';
+  private extError = '';
 
   constructor() {
-    this.gateway.on('event', (ev: GatewayEvent) => {
+    const onEvent = (ev: GatewayEvent) => {
       this.events.unshift(ev);
       this.events.length = Math.min(this.events.length, MAX_EVENTS);
       pushToRenderer('maskit/event', ev);
-    });
+    };
+    this.gateway.on('event', onEvent);
+    this.ext.on('event', onEvent);
   }
 
   private get configFile(): string {
@@ -76,6 +81,13 @@ class GatewayService {
       this.gateway.setEgressProxy(null);
     }
     logger.info('[maskit] egress proxy:', this.gateway.egressProxy ?? 'direct');
+    try {
+      await this.ext.apply(this.config.ext);
+      this.extError = '';
+    } catch (e) {
+      this.extError = (e as Error).message;
+      logger.error('[maskit] 扩展桥接启动失败:', e);
+    }
   }
 
   async start(): Promise<void> {
@@ -90,7 +102,7 @@ class GatewayService {
   }
 
   async stop(): Promise<void> {
-    await this.gateway.stop();
+    await Promise.all([this.gateway.stop(), this.ext.stop()]);
   }
 
   status() {
@@ -101,6 +113,7 @@ class GatewayService {
       upstreams: this.config.upstreams,
       mappings: this.store.size,
       lastError: this.lastError,
+      ext: { enabled: this.config.ext.enabled, port: this.ext.listeningPort, error: this.extError },
     };
   }
 
@@ -111,10 +124,16 @@ class GatewayService {
   /** 保存配置；端口/上游变化时重启监听。 */
   async setConfig(next: AppConfig): Promise<void> {
     const portsChanged = JSON.stringify(next.upstreams) !== JSON.stringify(this.config.upstreams);
-    this.config = next;
-    saveConfig(this.configFile, next);
+    this.config = { ...next, ext: normalizeExt(next.ext) };
+    saveConfig(this.configFile, this.config);
     await this.apply();
     if (portsChanged) await this.start();
+  }
+
+  /** 轮换扩展令牌：旧令牌立即失效，用户需在扩展设置里更新 */
+  async rotateExtToken(): Promise<AppConfig> {
+    await this.setConfig({ ...this.config, ext: { ...this.config.ext, token: generateExtToken() } });
+    return this.config;
   }
 
   listEvents(): GatewayEvent[] {

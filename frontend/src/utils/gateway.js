@@ -14,6 +14,8 @@ export const gw = {
   restart: () => call(ipcApiRoute.gatewayRestart),
   events: () => call(ipcApiRoute.gatewayEvents),
   clearMappings: () => call(ipcApiRoute.gatewayClearMappings),
+  rotateExtToken: () => call(ipcApiRoute.gatewayRotateExtToken),
+  openExtensionDir: () => call(ipcApiRoute.gatewayOpenExtensionDir),
   playground: (text) => call(ipcApiRoute.gatewayPlayground, { text }),
 }
 

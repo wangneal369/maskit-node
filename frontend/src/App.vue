@@ -23,6 +23,7 @@ const navs = [
   { to: '/playground', text: '试验台', ico: '✎' },
   { to: '/events', text: '日志', ico: '≡' },
   { to: '/rules', text: '规则', ico: '⚙' },
+  { to: '/extension', text: '浏览器扩展', ico: '⊕' },
 ];
 
 onMounted(() => {

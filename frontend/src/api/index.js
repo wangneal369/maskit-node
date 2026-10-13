@@ -10,6 +10,8 @@ const ipcApiRoute = {
   gatewayRestart: 'controller/gateway/restart',
   gatewayEvents: 'controller/gateway/events',
   gatewayClearMappings: 'controller/gateway/clearMappings',
+  gatewayRotateExtToken: 'controller/gateway/rotateExtToken',
+  gatewayOpenExtensionDir: 'controller/gateway/openExtensionDir',
   gatewayPlayground: 'controller/gateway/playground',
 }
 

@@ -3,4 +3,5 @@ export { MappingStore } from './store';
 export { Restorer } from './restorer';
 export { SseRestorer } from './sse';
 export { maskJson } from './tree';
+export { maskBody, type BodyMaskResult } from './body';
 export { DEFAULT_BUILTIN_RULES, DEFAULT_SECRET_PREFIXES, type RuleLabel } from './rules';

@@ -9,6 +9,7 @@ const constantRouterMap = [
   { path: '/playground', name: 'Playground', meta: { title: '试验台' }, component: () => import('@/views/playground/Index.vue') },
   { path: '/events', name: 'Events', meta: { title: '日志' }, component: () => import('@/views/events/Index.vue') },
   { path: '/rules', name: 'Rules', meta: { title: '规则' }, component: () => import('@/views/rules/Index.vue') },
+  { path: '/extension', name: 'Extension', meta: { title: '浏览器扩展' }, component: () => import('@/views/extension/Index.vue') },
 ]
 
 export default constantRouterMap

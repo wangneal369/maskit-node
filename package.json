@@ -1,6 +1,6 @@
 {
   "name": "data-maskit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "本地 LLM 隐私脱敏与还原网关（Electron 桌面版）",
   "main": "./public/electron/main.js",
   "scripts": {
@@ -45,6 +45,7 @@
   "dependencies": {
     "ee-core": "^5.0.1",
     "electron-updater": "^6.7.3",
+    "fflate": "^0.8.3",
     "undici": "^7.30.0"
   },
   "homepage": "https://github.com/wangneal369/maskit-node"

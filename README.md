@@ -31,6 +31,16 @@
 
 端口与上游地址可在「规则」页修改。
 
+## 浏览器扩展（网页版 AI）
+
+ChatGPT / Claude / DeepSeek 等网页版 AI 通过随附的 Chrome / Edge 扩展接入（与原项目扩展协议兼容）：
+
+1. 在应用「浏览器扩展」页开启桥接（默认监听 `127.0.0.1:5801`），复制访问令牌
+2. 点击「打开扩展目录」，在 `chrome://extensions` 开启开发者模式 →「加载已解压的扩展程序」选择该目录（也可从 Release 下载 `DataMaskit-extension-*.zip` 解压后加载）
+3. 在扩展「选项」页填写引擎地址与令牌
+
+网页发出的请求在本地打码后出网，回复流式还原；ChatGPT / Claude 上传的 docx / xlsx / pptx 附件同样在本地脱敏。
+
 ## 开发
 
 ```bash
@@ -47,10 +57,11 @@ npm test
 
 ```
 electron/core/      脱敏与还原核心（纯 TS，不依赖 Electron）
-electron/gateway/   多端口反向代理与配置
+electron/gateway/   多端口反向代理、扩展桥接、Office 附件脱敏与配置
 electron/service/   网关服务（生命周期、配置持久化）
 electron/controller/ IPC 接口
 frontend/           Vue 3 控制台
+extension/          浏览器扩展（MV3）
 tests/              单元与端到端测试
 ```
 

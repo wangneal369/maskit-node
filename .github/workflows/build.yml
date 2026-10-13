@@ -84,10 +84,15 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
+      - name: Zip browser extension
+        run: |
+          cd extension
+          zip -r "../dist/DataMaskit-extension-${GITHUB_REF_NAME}.zip" .
       - uses: softprops/action-gh-release@v3
         with:
           files: dist/*

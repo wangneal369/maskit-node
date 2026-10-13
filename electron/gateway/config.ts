@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_MASK_CONFIG, type MaskConfig } from '../core';
+import { DEFAULT_EXT_CONFIG, generateExtToken, type ExtBridgeConfig } from './ext-bridge';
 import type { Upstream } from './proxy';
 
 export interface AppConfig {
@@ -9,6 +10,8 @@ export interface AppConfig {
   egressProxy: string;
   upstreams: Upstream[];
   mask: MaskConfig;
+  /** 浏览器扩展桥接 */
+  ext: ExtBridgeConfig;
 }
 
 export const DEFAULT_UPSTREAMS: Upstream[] = [
@@ -23,6 +26,7 @@ export function defaultConfig(): AppConfig {
     egressProxy: '',
     upstreams: structuredClone(DEFAULT_UPSTREAMS),
     mask: structuredClone(DEFAULT_MASK_CONFIG),
+    ext: { ...DEFAULT_EXT_CONFIG },
   };
 }
 
@@ -40,7 +44,13 @@ export function loadConfig(file: string): AppConfig {
       secretPrefixes: raw.mask?.secretPrefixes ?? def.mask.secretPrefixes,
       customWords: raw.mask?.customWords ?? def.mask.customWords,
     },
+    ext: normalizeExt({ ...def.ext, ...raw.ext }),
   };
+}
+
+/** 启用了却没有令牌 = 扩展恒 403，所以启用时保证令牌存在。 */
+export function normalizeExt(ext: ExtBridgeConfig): ExtBridgeConfig {
+  return ext.enabled && !ext.token ? { ...ext, token: generateExtToken() } : ext;
 }
 
 export function saveConfig(file: string, config: AppConfig): void {
