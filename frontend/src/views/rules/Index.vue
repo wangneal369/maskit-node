@@ -188,7 +188,8 @@
   <div class="page" v-else><div class="sub">{{ err || '加载中...' }}</div></div>
 </template>
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import { useRoute } from 'vue-router';
 import { gw, RULE_META } from '@/utils/gateway';
 import { toast } from '@/utils/toast';
 
@@ -394,7 +395,16 @@ async function save() {
   finally { saving.value = false; }
 }
 
-onMounted(load);
+const route = useRoute();
+/** 从其他页跳来定位到某张卡片（如用量页「配置价格」→ ?focus=prices）；hash 路由下不能用 #锚点 */
+onMounted(async () => {
+  await load();
+  const focus = route.query.focus;
+  if (typeof focus === 'string' && focus) {
+    await nextTick();
+    document.getElementById(focus)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+});
 </script>
 <style lang="less" scoped>
 .rules {

@@ -81,7 +81,7 @@
               <td style="text-align:right">{{ fmt(m.input) }}</td>
               <td style="text-align:right">{{ fmt(m.output) }}</td>
               <td style="text-align:right;color:var(--warn)">
-                <template v-if="m.unpriced > 0">${{ fmt(m.cost, 2) }} <a href="#prices" style="color:inherit">配置价格</a></template>
+                <template v-if="m.unpriced > 0">${{ fmt(m.cost, 2) }} <router-link :to="{ path: '/rules', query: { focus: 'prices' } }" style="color:inherit">配置价格</router-link></template>
                 <template v-else>${{ fmt(m.cost, 2) }}</template>
               </td>
             </tr>

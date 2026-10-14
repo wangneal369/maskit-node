@@ -14,6 +14,8 @@ const constantRouterMap = [
   { path: '/extension', name: 'Extension', meta: { title: '浏览器扩展' }, component: () => import('@/views/extension/Index.vue') },
   { path: '/skill', name: 'Skill', meta: { title: '编程助手' }, component: () => import('@/views/skill/Index.vue') },
   { path: '/system', name: 'System', meta: { title: '系统' }, component: () => import('@/views/system/Index.vue') },
+  // 未知地址回概览，避免空白页（hash 路由下误写的 #锚点 会被当成路由）
+  { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
 ]
 
 export default constantRouterMap
