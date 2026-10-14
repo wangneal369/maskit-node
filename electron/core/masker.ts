@@ -159,12 +159,22 @@ interface EntityPlan {
  */
 const entityPlans = new WeakMap<ReadonlyMap<string, string>, EntityPlan | null>();
 
+/**
+ * 中文实体按子串匹配（中文无词边界）；以字母数字开头/结尾的一侧要求词边界，
+ * 否则 NER 误报的 "su" 会切进 issue / summary / result 这类英文单词。
+ */
+const WORD_CH = /[A-Za-z0-9_]/;
+function entityPattern(w: string): string {
+  const body = w.replace(ESC_RX, '\\$&');
+  return (WORD_CH.test(w[0]) ? '(?<![A-Za-z0-9_])' : '') + body + (WORD_CH.test(w[w.length - 1]) ? '(?![A-Za-z0-9_])' : '');
+}
+
 function entityPlan(entities: ReadonlyMap<string, string>): EntityPlan | null {
   let plan = entityPlans.get(entities);
   if (plan !== undefined) return plan;
   const words = [...entities.keys()].filter((w) => w.length >= MIN_ENTITY_CHARS).sort((a, b) => b.length - a.length);
   plan = words.length
-    ? { rx: new RegExp(words.map((w) => w.replace(ESC_RX, '\\$&')).join('|'), 'g'), labels: entities }
+    ? { rx: new RegExp(words.map(entityPattern).join('|'), 'g'), labels: entities }
     : null;
   entityPlans.set(entities, plan);
   return plan;

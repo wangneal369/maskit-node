@@ -12,16 +12,19 @@ const SKIP_SCALAR_KEYS = new Set([
   'images', 'mimeType',
 ]);
 const SKIP_SUBTREE_KEYS = new Set(['cache_control']);
+// input / summary：OpenAI Responses 顶层 input 的条目（message / reasoning / function_call…）与 reasoning.summary 的条目
 const ROLE_TYPE_PARENTS = new Set([
   'message', 'messages', 'content', 'contents', 'parts', 'block', 'blocks',
   'tools', 'tool', 'tool_calls', 'function', 'response_format', 'candidates', 'choices', 'output',
+  'input', 'summary',
 ]);
 const PROTOCOL_ID_PARENTS = new Set([
   'message', 'messages', 'content', 'contents', 'parts', 'block', 'blocks',
   'tool_calls', 'tool_use', 'response', 'output', 'data', 'object', 'candidates', 'choices', 'function_call',
+  'input',
 ]);
 const PROTOCOL_PARENTS = new Set([
-  'function', 'functions', 'function_call', 'functionCall', 'tool_use', 'tools', 'tool',
+  'function', 'functions', 'function_call', 'functionCall', 'tool_use', 'tools', 'tool', 'input',
   'image_url', 'inline_data', 'thumbnail', 'input_image', 'source', 'file',
   // Gemini 驼峰写法的媒体容器（data 为图片 / 文件 base64）
   'inlineData', 'fileData',
@@ -30,6 +33,13 @@ const SKIP_KEYS = new Set(['id', 'tool_call_id', 'tool_use_id', 'name', 'url', '
 /** 工具调用关联 ID：不分业务区一律豁免，脱敏必然断链 */
 const CORRELATION_ID_KEYS = new Set(['tool_call_id', 'tool_use_id', 'call_id']);
 const BUSINESS_KEYS = new Set(['input', 'arguments', 'parameters', 'partial_json', 'documents']);
+/**
+ * 业务区判定。input 有两种含义：Anthropic tool_use.input 是工具参数（业务数据，键名也要扫）；
+ * OpenAI Responses 的请求体顶层 input 是整段对话（协议骨架），当业务区会把 summary / type / id 等改坏，上游 400。
+ */
+function isBusinessKey(k: string, depth: number): boolean {
+  return BUSINESS_KEYS.has(k) && !(k === 'input' && depth === 0);
+}
 const SKIP_NUMERIC_KEYS = new Set([
   'max_tokens', 'max_completion_tokens', 'max_tokens_to_sample', 'budget_tokens',
   'temperature', 'top_p', 'top_k', 'n', 'seed', 'index', 'created', 'logprobs',
@@ -122,7 +132,7 @@ export function maskJson(masker: Masker, root: Json, opts?: MaskJsonOptions): Tr
         }
         // 业务区内的键名也可能是数据（{"手机号": ...}），业务区外的键名是协议骨架
         const nk = inBusiness ? maskStr(k) : k;
-        out[nk] = walk(v, k, key, inBusiness || BUSINESS_KEYS.has(k), depth + 1);
+        out[nk] = walk(v, k, key, inBusiness || isBusinessKey(k, depth), depth + 1);
       }
       return out;
     }
