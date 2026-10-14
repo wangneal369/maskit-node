@@ -1,6 +1,6 @@
 {
   "name": "data-maskit-frontend",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "scripts": {
     "dev": "vite --host --port 8080",
     "serve": "vite --host --port 8080",

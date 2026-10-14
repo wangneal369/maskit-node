@@ -1,6 +1,6 @@
 {
   "name": "data-maskit",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "本地 LLM 隐私脱敏与还原网关",
   "main": "./public/electron/main.js",
   "scripts": {
