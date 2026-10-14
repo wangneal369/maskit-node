@@ -39,10 +39,12 @@ export interface AppBehaviorConfig {
   autostart: boolean;
   /** 启动时检查新版本（访问 GitHub Releases API，默认关闭） */
   checkUpdates: boolean;
+  /** 关闭窗口时缩到系统托盘、网关继续后台运行（仅桌面版，默认开启） */
+  closeToTray: boolean;
 }
 
 export const DEFAULT_NER_CONFIG: NerConfig = { enabled: false, budgetMs: 800 };
-export const DEFAULT_APP_BEHAVIOR: AppBehaviorConfig = { autostart: false, checkUpdates: false };
+export const DEFAULT_APP_BEHAVIOR: AppBehaviorConfig = { autostart: false, checkUpdates: false, closeToTray: true };
 
 export function normalizeNer(n: Partial<NerConfig> | undefined): NerConfig {
   const b = Number(n?.budgetMs);
@@ -53,7 +55,7 @@ export function normalizeNer(n: Partial<NerConfig> | undefined): NerConfig {
 }
 
 export function normalizeAppBehavior(a: Partial<AppBehaviorConfig> | undefined): AppBehaviorConfig {
-  return { autostart: a?.autostart === true, checkUpdates: a?.checkUpdates === true };
+  return { autostart: a?.autostart === true, checkUpdates: a?.checkUpdates === true, closeToTray: a?.closeToTray !== false };
 }
 
 /** 价格覆盖：只保留非负数字，模型名去空白；非法条目丢弃 */

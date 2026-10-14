@@ -22,7 +22,7 @@ export default (): Partial<Config> => {
         //preload: path.join(getElectronDir(), 'preload', 'bridge.js'),
       },
       frame: true,
-      show: true,
+      show: false,
       icon: path.join(getBaseDir(), 'public', 'images', 'logo-32.png'),
     },
     logger: {

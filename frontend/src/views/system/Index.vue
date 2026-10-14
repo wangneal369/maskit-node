@@ -99,11 +99,18 @@
     </div>
 
     <div v-if="isElectron" class="card">
-      <div class="card-title">开机自启</div>
+      <div class="card-title">后台运行</div>
+      <div class="row toggle-row" style="margin-bottom:14px">
+        <div class="switch" :class="{ on: appCfg.closeToTray }" @click="toggleApp('closeToTray')"></div>
+        <div class="grow">
+          <b>关闭窗口时缩到系统托盘</b>
+          <div class="sub" style="margin-top:4px">网关继续在后台运行；从托盘菜单「退出」才会真正关闭。关掉此项则关窗即退出</div>
+        </div>
+      </div>
       <div class="row toggle-row">
         <div class="switch" :class="{ on: appCfg.autostart, disabled: autostartDisabled }" @click="toggleApp('autostart')"></div>
         <div class="grow">
-          <b>开机时自动启动</b>
+          <b>开机时自动启动</b><span v-if="appCfg.closeToTray" class="sub">（启动后只在托盘，不弹窗口）</span>
           <div class="sub" style="margin-top:4px">{{ autostartHint }}</div>
         </div>
       </div>
@@ -148,7 +155,7 @@ const upd = ref(null);
 const ups = ref({ supported: false, status: 'idle' });
 const pct = computed(() => Math.max(0, Math.min(100, Math.round(ups.value.progress?.percent ?? 0))));
 const backups = ref([]);
-const appCfg = ref({ autostart: false, checkUpdates: false });
+const appCfg = ref({ autostart: false, checkUpdates: false, closeToTray: true });
 const autostart = ref(null);
 
 const errMsg = (e) => e?.message || String(e);
@@ -241,7 +248,7 @@ let offUpdater = () => {};
 async function loadAppSettings() {
   try {
     const c = await gw.getConfig();
-    appCfg.value = { autostart: false, checkUpdates: false, ...(c.app || {}) };
+    appCfg.value = { autostart: false, checkUpdates: false, closeToTray: true, ...(c.app || {}) };
   } catch (e) { toast('读取配置失败：' + errMsg(e), false); }
 }
 
@@ -257,7 +264,7 @@ async function toggleApp(key) {
   const next = !appCfg.value[key];
   try {
     const cfg = await gw.getConfig();
-    cfg.app = { autostart: false, checkUpdates: false, ...(cfg.app || {}), [key]: next };
+    cfg.app = { autostart: false, checkUpdates: false, closeToTray: true, ...(cfg.app || {}), [key]: next };
     await gw.setConfig(cfg);
     appCfg.value = { ...appCfg.value, [key]: next };
     toast('设置已保存');

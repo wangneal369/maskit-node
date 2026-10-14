@@ -3,6 +3,7 @@ import { logger } from 'ee-core/log';
 import { getConfig } from 'ee-core/config';
 import { getMainWindow } from 'ee-core/electron';
 import { gatewayService } from '../service/gateway';
+import { trayService } from '../service/tray';
 
 class Lifecycle {
   /**
@@ -17,18 +18,15 @@ class Lifecycle {
    */
   async electronAppReady(): Promise<void> {
     logger.info('[lifecycle] electron-app-ready');
-    // 系统代理要在 app ready 后才能解析，所以网关在这里启动
-    await gatewayService.init();
+    // 系统代理要在 app ready 后才能解析，所以网关在这里启动；托盘依赖配置，放在其后（网关失败也要建托盘）
+    try {
+      await gatewayService.init();
+    } finally {
+      trayService.init();
+    }
 
     // When double clicking the icon, display the opened window
-    electronApp.on('second-instance', () => {
-      const win = getMainWindow();
-      if (win.isMinimized()) {
-        win.restore();
-      }
-      win.show();
-      win.focus();
-    });
+    electronApp.on('second-instance', () => trayService.showWindow());
   }
 
   /**
@@ -50,13 +48,17 @@ class Lifecycle {
     const y = Math.floor((height - windowHeight) / 2);
     win.setBounds({ x, y, width: windowWidth, height: windowHeight })
 
-    // Delayed loading, no white screen
+    // 窗口默认不显示（windowsOption.show = false），页面就绪后再决定：开机自启（--hidden）且启用托盘时只进托盘。
+    // 托盘依赖配置，而本事件早于网关初始化，所以先等托盘就绪
     const { windowsOption } = getConfig();
     if (windowsOption.show == false) {
       win.once('ready-to-show', () => {
-        win.show();
-        win.focus();
-      })
+        void trayService.ready.then(() => {
+          if (trayService.startHidden) return;
+          win.show();
+          win.focus();
+        });
+      });
     }
   }
 
