@@ -115,6 +115,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          # 生成更新说明要找上一个 tag 和其间的提交
+          fetch-depth: 0
       - uses: actions/download-artifact@v8
         with:
           path: dist
@@ -129,10 +132,13 @@ jobs:
         run: |
           cd agent-bundle
           zip -r "../dist/maskit-placeholders-${GITHUB_REF_NAME}.zip" maskit-placeholders/SKILL.md maskit-placeholders/README.md maskit-placeholders/README_EN.md maskit-placeholders/templates/AGENTS.snippet.md
+      - name: Release notes
+        # 更新内容 + 各平台下载直链；--check 保证表里链接的文件都在本次产物里
+        run: node scripts/release-notes.mjs "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY" --check dist > release-notes.md
       - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
-          generate_release_notes: true
+          body_path: release-notes.md
 
   docker:
     # 无头镜像（网关 + 扩展桥接 + Web 面板），仅在打 tag 或手动触发时发布
