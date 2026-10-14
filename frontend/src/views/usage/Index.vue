@@ -20,11 +20,11 @@
           <div class="num">{{ fmt(data.requests) }}</div>
         </div>
         <div class="card summary">
-          <div class="sub">输入 tokens</div>
+          <div class="sub" title="不含缓存命中部分（命中的计入「缓存读」）">输入 tokens（未命中缓存）</div>
           <div class="num">{{ fmt(data.input) }}</div>
         </div>
         <div class="card summary">
-          <div class="sub">输出 tokens</div>
+          <div class="sub" title="含推理 / 思考 token">输出 tokens</div>
           <div class="num">{{ fmt(data.output) }}</div>
         </div>
         <div class="card summary">

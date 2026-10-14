@@ -72,13 +72,43 @@ function usageFromOllama(d: Record<string, unknown>): Usage | undefined {
 }
 
 /**
- * 从非流式 JSON 响应提取用量。
- * 支持格式：
- * - OpenAI chat: usage.prompt_tokens / completion_tokens + prompt_tokens_details.cached_tokens
- * - OpenAI Responses: usage.input_tokens / output_tokens + input_tokens_details.cached_tokens
- * - Anthropic: usage.input_tokens / output_tokens + cache_read_input_tokens / cache_creation_input_tokens
- * - Gemini: usageMetadata.promptTokenCount / candidatesTokenCount / cachedContentTokenCount / thoughtsTokenCount
- * - Ollama: 顶层 prompt_eval_count / eval_count
+ * 把各家 usage 对象统一成 Usage。约定：input 只算「未命中缓存」的输入，命中部分进 cacheRead。
+ * - OpenAI chat：prompt_tokens 含缓存命中（prompt_tokens_details.cached_tokens；DeepSeek 为 prompt_cache_hit_tokens）
+ * - OpenAI Responses：input_tokens 含缓存命中（input_tokens_details.cached_tokens）
+ * - Anthropic：input_tokens 本就不含缓存，另有 cache_read_input_tokens / cache_creation_input_tokens
+ * 输出 token 已含推理 token（completion_tokens / output_tokens 的口径）。
+ */
+export function normalizeUsage(raw: unknown): Usage | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const u = raw as Record<string, unknown>;
+  const n = (v: unknown) => Number(v) || 0;
+  const details = (k: string) => (typeof u[k] === 'object' && u[k] !== null ? (u[k] as Record<string, unknown>) : undefined);
+
+  if ('prompt_tokens' in u || 'completion_tokens' in u) {
+    const cacheRead = n(details('prompt_tokens_details')?.cached_tokens) || n(u.prompt_cache_hit_tokens);
+    return { input: Math.max(0, n(u.prompt_tokens) - cacheRead), output: n(u.completion_tokens), cacheRead, cacheWrite: 0 };
+  }
+  if ('cache_read_input_tokens' in u || 'cache_creation_input_tokens' in u) {
+    return {
+      input: n(u.input_tokens),
+      output: n(u.output_tokens),
+      cacheRead: n(u.cache_read_input_tokens),
+      cacheWrite: n(u.cache_creation_input_tokens),
+    };
+  }
+  if ('input_tokens' in u || 'output_tokens' in u) {
+    const cacheRead = n(details('input_tokens_details')?.cached_tokens);
+    return { input: Math.max(0, n(u.input_tokens) - cacheRead), output: n(u.output_tokens), cacheRead, cacheWrite: 0 };
+  }
+  return undefined;
+}
+
+function isEmpty(u: Usage): boolean {
+  return !u.input && !u.output && !u.cacheRead && !u.cacheWrite;
+}
+
+/**
+ * 从非流式 JSON 响应提取用量（OpenAI chat / Responses、Anthropic、DeepSeek、Gemini、Ollama）。
  * 拿不到返回 undefined。
  */
 export function usageFromJson(body: unknown): Usage | undefined {
@@ -91,56 +121,18 @@ export function usageFromJson(body: unknown): Usage | undefined {
     return undefined;
   }
   if (typeof body !== 'object' || body === null) return undefined;
-
   const b = body as Record<string, unknown>;
-  const gem = usageFromGemini(b.usageMetadata);
-  if (gem) return gem;
-  const oll = usageFromOllama(b);
-  if (oll) return oll;
-  const usage = b.usage as Record<string, unknown> | undefined;
-
-  if (!usage || typeof usage !== 'object') return undefined;
-
-  // OpenAI chat 格式（prompt_tokens / completion_tokens）
-  if ('prompt_tokens' in usage && 'completion_tokens' in usage) {
-    const input = Number(usage.prompt_tokens) || 0;
-    const output = Number(usage.completion_tokens) || 0;
-    // OpenAI 的 cached_tokens 包含在 prompt_tokens 里
-    const details = usage.prompt_tokens_details as Record<string, unknown> | undefined;
-    const cacheRead = Number(details?.cached_tokens) || 0;
-    return { input: Math.max(0, input - cacheRead), output, cacheRead, cacheWrite: 0 };
-  }
-
-  // Anthropic 格式：有 cache_read_input_tokens 或 cache_creation_input_tokens
-  if ('cache_read_input_tokens' in usage || 'cache_creation_input_tokens' in usage) {
-    const input = Number(usage.input_tokens) || 0;
-    const output = Number(usage.output_tokens) || 0;
-    const cacheRead = Number(usage.cache_read_input_tokens) || 0;
-    // cache_creation_input_tokens 是输入中创建缓存的部分，计入 input 的定价
-    const cacheWrite = Number(usage.cache_creation_input_tokens) || 0;
-    return { input, output, cacheRead, cacheWrite };
-  }
-
-  // OpenAI Responses 格式（input_tokens / output_tokens + input_tokens_details）
-  if ('input_tokens' in usage && 'output_tokens' in usage) {
-    const input = Number(usage.input_tokens) || 0;
-    const output = Number(usage.output_tokens) || 0;
-    // Responses 格式也可能有 input_tokens_details
-    const details = usage.input_tokens_details as Record<string, unknown> | undefined;
-    const cacheRead = Number(details?.cached_tokens) || 0;
-    return { input: Math.max(0, input - cacheRead), output, cacheRead, cacheWrite: 0 };
-  }
-
-  return undefined;
+  const u = usageFromGemini(b.usageMetadata) ?? usageFromOllama(b) ?? normalizeUsage(b.usage);
+  return u && !isEmpty(u) ? u : undefined;
 }
 
 /**
- * 流式用量收集器。
- * 逐个 SSE data 对象喂入，结束后调用 result() 获取累计用量。
- * 支持格式：
- * - OpenAI chat: 末尾 chunk 的 usage
- * - OpenAI Responses: message_start.message.usage（input） + message_delta.usage.output_tokens（取最后一次）
- * - Anthropic: message_start.message.usage（input+cache）+ message_delta.usage.output_tokens（累加）
+ * 流式用量收集器：逐个 SSE / NDJSON 数据对象喂入，结束后 result() 取用量。
+ * - OpenAI chat / DeepSeek：带 usage 的 chunk（通常是最后一个，需 stream_options.include_usage）
+ * - OpenAI Responses：response.completed / response.incomplete / response.failed 事件的 response.usage
+ * - Anthropic：message_start.message.usage（输入 + 缓存）+ message_delta 顶层 usage（output_tokens 为累计值，取最后一次；
+ *   新版 API 在 message_delta 里也可能带输入 / 缓存的累计值，出现即覆盖）
+ * - Gemini：每个 chunk 的 usageMetadata 是累计值，取最后一次；Ollama：终止行的 eval 计数
  */
 export class UsageCollector {
   private u: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -148,81 +140,52 @@ export class UsageCollector {
 
   feed(data: unknown): void {
     if (typeof data !== 'object' || data === null) return;
-
     const d = data as Record<string, unknown>;
+    const msg = typeof d.message === 'object' && d.message !== null ? (d.message as Record<string, unknown>) : undefined;
+    const resp = typeof d.response === 'object' && d.response !== null ? (d.response as Record<string, unknown>) : undefined;
 
-    // 提取并保存模型名（优先级：message.model > response.model > 响应的 model）
-    if (typeof d.message === 'object' && d.message !== null) {
-      const msg = d.message as Record<string, unknown>;
-      this.m = this.m || (typeof msg.model === 'string' ? msg.model : undefined);
-    }
-    if (typeof d.response === 'object' && d.response !== null) {
-      const resp = d.response as Record<string, unknown>;
-      this.m = this.m || (typeof resp.model === 'string' ? resp.model : undefined);
-    }
-    this.m = this.m || (typeof d.model === 'string' ? d.model : undefined);
-    this.m = this.m || (typeof d.modelVersion === 'string' ? d.modelVersion : undefined);
+    // 模型名：message.model > response.model > 顶层 model > Gemini modelVersion
+    this.m ||= [msg?.model, resp?.model, d.model, d.modelVersion].find((v): v is string => typeof v === 'string' && v !== '');
 
-    // Gemini：每个 chunk 的 usageMetadata 是累计值，取最后一次；Ollama：终止行的 eval 计数
-    const gem = usageFromGemini(d.usageMetadata) ?? usageFromOllama(d);
-    if (gem) {
-      this.u = gem;
+    const whole = usageFromGemini(d.usageMetadata) ?? usageFromOllama(d);
+    if (whole) {
+      this.u = whole;
       return;
     }
 
-    // OpenAI chat: 末尾 chunk 的 usage（每个 delta 都可能有，但通常只有最后一个）
-    if (d.type === 'content_block_delta' || (typeof d.usage === 'object' && d.usage !== null)) {
+    // Anthropic message_start：输入与缓存（output_tokens 此时只是占位的 1，留给 message_delta）
+    if (d.type === 'message_start' && msg) {
+      const u = normalizeUsage(msg.usage);
+      if (u) this.u = { ...u, output: Math.max(this.u.output, u.output) };
+      return;
+    }
+
+    // Anthropic message_delta：usage 在事件顶层，字段都是累计值
+    if (d.type === 'message_delta') {
       const usage = d.usage as Record<string, unknown> | undefined;
-      if (usage && 'prompt_tokens' in usage && 'completion_tokens' in usage) {
-        const promptTokens = Number(usage.prompt_tokens) || 0;
-        this.u.output = Number(usage.completion_tokens) || 0;
-        const details = usage.prompt_tokens_details as Record<string, unknown> | undefined;
-        const cacheRead = Number(details?.cached_tokens) || 0;
-        this.u.cacheRead = cacheRead;
-        // OpenAI chat: cached_tokens 包含在 prompt_tokens 里，需要减掉
-        this.u.input = Math.max(0, promptTokens - cacheRead);
+      if (usage && typeof usage === 'object') {
+        if ('output_tokens' in usage) this.u.output = Number(usage.output_tokens) || 0;
+        if (Number(usage.input_tokens)) this.u.input = Number(usage.input_tokens);
+        if (Number(usage.cache_read_input_tokens)) this.u.cacheRead = Number(usage.cache_read_input_tokens);
+        if (Number(usage.cache_creation_input_tokens)) this.u.cacheWrite = Number(usage.cache_creation_input_tokens);
       }
+      return;
     }
 
-    // OpenAI Responses: message_start 有初始 input（检查是否有 input_tokens_details 来区分 Anthropic）
-    if (d.type === 'message_start' && typeof d.message === 'object' && d.message !== null) {
-      const msg = d.message as Record<string, unknown>;
-      const usage = msg.usage as Record<string, unknown> | undefined;
-      // 优先识别 OpenAI Responses（有 input_tokens_details 或没有 Anthropic 特有字段）
-      if (usage && 'input_tokens' in usage && !('cache_read_input_tokens' in usage)) {
-        const inputTokens = Number(usage.input_tokens) || 0;
-        const details = usage.input_tokens_details as Record<string, unknown> | undefined;
-        const cacheRead = Number(details?.cached_tokens) || 0;
-        this.u.cacheRead = cacheRead;
-        // OpenAI Responses: 同样需要减掉 cached_tokens
-        this.u.input = Math.max(0, inputTokens - cacheRead);
-      }
-      // Anthropic: 有 cache_read_input_tokens 或 cache_creation_input_tokens
-      else if (usage && ('cache_read_input_tokens' in usage || 'cache_creation_input_tokens' in usage)) {
-        if ('input_tokens' in usage) {
-          this.u.input = Number(usage.input_tokens) || 0;
-        }
-        if ('cache_read_input_tokens' in usage) {
-          this.u.cacheRead = Number(usage.cache_read_input_tokens) || 0;
-        }
-        if ('cache_creation_input_tokens' in usage) {
-          this.u.cacheWrite = Number(usage.cache_creation_input_tokens) || 0;
-        }
-      }
+    // OpenAI Responses：终态事件里的 response.usage 是整次请求的最终用量
+    if (resp && resp.usage) {
+      const u = normalizeUsage(resp.usage);
+      if (u && !isEmpty(u)) this.u = u;
+      return;
     }
 
-    // OpenAI Responses 与 Anthropic: message_delta.usage.output_tokens（取最后一次，非累加）
-    if (d.type === 'message_delta' && typeof d.delta === 'object' && d.delta !== null) {
-      const delta = d.delta as Record<string, unknown>;
-      const usage = delta.usage as Record<string, unknown> | undefined;
-      if (usage && 'output_tokens' in usage) {
-        this.u.output = Number(usage.output_tokens) || 0;
-      }
-    }
+    // OpenAI chat / DeepSeek：带 usage 的 chunk（中间 chunk 的 usage 为 null）
+    const u = normalizeUsage(d.usage);
+    if (u && !isEmpty(u)) this.u = u;
   }
 
   result(): Usage | undefined {
-    return this.u.input || this.u.output ? { ...this.u } : undefined;
+    return isEmpty(this.u) ? undefined : { ...this.u };
   }
 
   model(): string | undefined {

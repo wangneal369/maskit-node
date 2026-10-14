@@ -79,69 +79,83 @@ describe('usageFromJson', () => {
 });
 
 describe('UsageCollector', () => {
-  it('OpenAI chat stream：末尾 chunk 的 usage', () => {
+  it('OpenAI chat stream：中间 chunk usage 为 null，末尾 chunk 带 usage', () => {
     const col = new UsageCollector();
-    col.feed({ type: 'content_block_delta' }); // 过渡 chunk
+    col.feed({ object: 'chat.completion.chunk', model: 'gpt-4o', choices: [{ delta: { content: 'hi' } }], usage: null });
     col.feed({
-      type: 'message_stop',
-      usage: {
-        prompt_tokens: 100,
-        completion_tokens: 50,
-        prompt_tokens_details: { cached_tokens: 10 },
-      },
+      object: 'chat.completion.chunk',
+      choices: [],
+      usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150, prompt_tokens_details: { cached_tokens: 10 } },
     });
-    const u = col.result();
-    expect(u).toEqual({ input: 90, output: 50, cacheRead: 10, cacheWrite: 0 });
+    expect(col.result()).toEqual({ input: 90, output: 50, cacheRead: 10, cacheWrite: 0 });
+    expect(col.model()).toBe('gpt-4o');
   });
 
-  it('OpenAI Responses stream：message_start(input) + message_delta(output)', () => {
+  it('DeepSeek stream：缓存命中在 prompt_cache_hit_tokens', () => {
+    const col = new UsageCollector();
+    col.feed({
+      model: 'deepseek-chat',
+      choices: [],
+      usage: { prompt_tokens: 1000, completion_tokens: 20, prompt_cache_hit_tokens: 960, prompt_cache_miss_tokens: 40 },
+    });
+    expect(col.result()).toEqual({ input: 40, output: 20, cacheRead: 960, cacheWrite: 0 });
+  });
+
+  it('OpenAI Responses stream：response.completed 里的 response.usage（Codex）', () => {
+    const col = new UsageCollector();
+    col.feed({ type: 'response.created', response: { id: 'resp_1', model: 'gpt-5', usage: null } });
+    col.feed({ type: 'response.in_progress', response: { id: 'resp_1', usage: null } });
+    col.feed({ type: 'response.output_text.delta', delta: 'hi' });
+    col.feed({
+      type: 'response.completed',
+      response: {
+        id: 'resp_1',
+        model: 'gpt-5',
+        usage: {
+          input_tokens: 12000,
+          input_tokens_details: { cached_tokens: 11000 },
+          output_tokens: 800,
+          output_tokens_details: { reasoning_tokens: 600 },
+          total_tokens: 12800,
+        },
+      },
+    });
+    expect(col.result()).toEqual({ input: 1000, output: 800, cacheRead: 11000, cacheWrite: 0 });
+    expect(col.model()).toBe('gpt-5');
+  });
+
+  it('OpenAI Responses stream：response.incomplete 同样计入', () => {
+    const col = new UsageCollector();
+    col.feed({ type: 'response.incomplete', response: { usage: { input_tokens: 10, output_tokens: 5 } } });
+    expect(col.result()).toEqual({ input: 10, output: 5, cacheRead: 0, cacheWrite: 0 });
+  });
+
+  it('Anthropic stream：message_start 输入 + 缓存，message_delta 顶层 usage 的累计输出', () => {
     const col = new UsageCollector();
     col.feed({
       type: 'message_start',
       message: {
-        id: 'msg_1',
-        usage: {
-          input_tokens: 200,
-          input_tokens_details: { cached_tokens: 50 },
-        },
+        model: 'claude-sonnet-4-5',
+        usage: { input_tokens: 180, cache_read_input_tokens: 30, cache_creation_input_tokens: 20, output_tokens: 1 },
       },
     });
-    col.feed({
-      type: 'message_delta',
-      delta: {
-        usage: { output_tokens: 75 },
-      },
-    });
-    const u = col.result();
-    expect(u).toEqual({ input: 150, output: 75, cacheRead: 50, cacheWrite: 0 });
+    col.feed({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'hi' } });
+    col.feed({ type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 60 } });
+    col.feed({ type: 'message_delta', delta: {}, usage: { output_tokens: 62 } }); // 累计值：取最后一次
+    expect(col.result()).toEqual({ input: 180, output: 62, cacheRead: 30, cacheWrite: 20 });
   });
 
-  it('Anthropic stream：message_start(input+cache) + message_delta(output, 非累加)', () => {
+  it('Anthropic stream：message_delta 带输入 / 缓存累计值时覆盖', () => {
     const col = new UsageCollector();
-    col.feed({
-      type: 'message_start',
-      message: {
-        usage: {
-          input_tokens: 180,
-          cache_read_input_tokens: 30,
-          cache_creation_input_tokens: 20,
-        },
-      },
-    });
-    col.feed({
-      type: 'message_delta',
-      delta: {
-        usage: { output_tokens: 60 },
-      },
-    });
-    col.feed({
-      type: 'message_delta',
-      delta: {
-        usage: { output_tokens: 62 }, // 最后一次，取 62 不是 60+62
-      },
-    });
-    const u = col.result();
-    expect(u).toEqual({ input: 180, output: 62, cacheRead: 30, cacheWrite: 20 });
+    col.feed({ type: 'message_start', message: { usage: { input_tokens: 5, cache_read_input_tokens: 0, output_tokens: 1 } } });
+    col.feed({ type: 'message_delta', delta: {}, usage: { input_tokens: 7, cache_read_input_tokens: 900, output_tokens: 40 } });
+    expect(col.result()).toEqual({ input: 7, output: 40, cacheRead: 900, cacheWrite: 0 });
+  });
+
+  it('全部命中缓存（输入 0）也要计入', () => {
+    const col = new UsageCollector();
+    col.feed({ type: 'response.completed', response: { usage: { input_tokens: 500, input_tokens_details: { cached_tokens: 500 }, output_tokens: 0 } } });
+    expect(col.result()).toEqual({ input: 0, output: 0, cacheRead: 500, cacheWrite: 0 });
   });
 
   it('提取模型名：message.model > response.model > 顶层 model', () => {
